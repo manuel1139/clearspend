@@ -1,0 +1,13 @@
+{
+  "name": "ClearSpend",
+  "description": "AI-powered receipt scanner and expense manager with automated categorization and custom tagging.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "AI-powered receipt scanning",
+    "Automated expense categorization",
+    "Custom tagging system",
+    "JSON data export"
+  ]
+}
