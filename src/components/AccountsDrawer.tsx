@@ -25,32 +25,32 @@ export function AccountsDrawer({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-end bg-[#08102E]/42 p-3 sm:p-6"
+          className="fixed inset-0 z-50 flex items-end bg-[#4F1836]/36 p-3 sm:p-6"
         >
           <motion.div
             initial={{ y: 24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
-            className="mx-auto w-full max-w-md rounded-4xl bg-[#F6F7FB] p-4 shadow-[0_28px_80px_rgba(8,16,46,0.35)]"
+            className="mx-auto flex max-h-[calc(100vh-1.5rem)] w-full max-w-md flex-col rounded-4xl bg-[linear-gradient(180deg,#FFF8FB_0%,#FCECF5_100%)] p-4 shadow-[0_28px_80px_rgba(110,28,74,0.28)] sm:max-h-[calc(100vh-3rem)]"
           >
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                <p className="text-[11px] uppercase tracking-[0.28em] text-[#B56A8F]">
                   Accounts
                 </p>
-                <h3 className="mt-1 text-xl font-semibold text-slate-950">
+                <h3 className="mt-1 text-xl font-semibold text-[#45152F]">
                   Available accounts
                 </h3>
               </div>
               <button
                 onClick={onClose}
-                className="rounded-full bg-white p-2 text-slate-500 shadow-sm"
+                className="rounded-full bg-white p-2 text-[#A54B79] shadow-sm"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3 overflow-y-auto pr-1">
               {accounts.map((account, index) => {
                 const isExpanded = expandedAccountId === account.id;
                 return (
@@ -61,7 +61,7 @@ export function AccountsDrawer({
                     onClick={() =>
                       setExpandedAccountId(isExpanded ? null : account.id)
                     }
-                    className={`w-full overflow-hidden rounded-[1.8rem] bg-linear-to-br ${account.accent} px-4 py-4 text-left text-white shadow-[0_16px_40px_rgba(31,60,255,0.2)]`}
+                    className={`w-full overflow-hidden rounded-[1.8rem] bg-linear-to-br ${account.accent} px-4 py-4 text-left text-white shadow-[0_16px_40px_rgba(141,44,102,0.24)]`}
                     style={{
                       marginTop: index === 0 ? 0 : -14,
                     }}
@@ -88,14 +88,14 @@ export function AccountsDrawer({
                       />
                     </div>
 
-                    <div className="mt-5 flex items-end justify-between">
+                    <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                       <div>
                         <p className="text-xs text-white/65">Current balance</p>
                         <p className="mt-1 text-2xl font-semibold">
                           {account.balance}
                         </p>
                       </div>
-                      <div className="text-right">
+                      <div className="sm:text-right">
                         <p className="text-xs text-white/65">{account.syncedAt}</p>
                         <p className="mt-1 text-sm text-white/85">
                           {account.ibanMasked}

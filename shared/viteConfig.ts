@@ -1,0 +1,29 @@
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+import { loadEnv, type UserConfig } from "vite";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export function createViteConfig(mode: string): UserConfig {
+  const env = loadEnv(mode, ".", "");
+
+  return {
+    plugins: [react(), tailwindcss()],
+    define: {
+      "process.env.GEMINI_API_KEY": JSON.stringify(env.GEMINI_API_KEY),
+    },
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, ".."),
+      },
+    },
+    server: {
+      // HMR is disabled in AI Studio via DISABLE_HMR env var.
+      // Do not modify-file watching is disabled to prevent flickering during agent edits.
+      hmr: process.env.DISABLE_HMR !== "true",
+    },
+  };
+}

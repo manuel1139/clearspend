@@ -1,11 +1,15 @@
 import {
   eachDayOfInterval,
   endOfDay,
+  endOfMonth,
   format,
   isWithinInterval,
   parseISO,
   startOfDay,
+  startOfMonth,
   subDays,
+  subMonths,
+  subYears,
 } from 'date-fns';
 import type { Receipt } from '../types';
 
@@ -16,37 +20,86 @@ export interface SpendHistoryPoint {
   cumulative: number;
 }
 
-export function getMonthlySpent(receipts: Receipt[]) {
-  const now = new Date();
-  const rangeStart = startOfDay(subDays(now, 29));
-  const rangeEnd = endOfDay(now);
+export type DateRangePreset =
+  | 'current-month'
+  | 'last-month'
+  | 'last-year'
+  | 'last-10-days'
+  | 'custom';
 
-  return receipts
-    .filter((receipt) => {
-      const receiptDate = parseISO(receipt.date);
-      return isWithinInterval(receiptDate, {
-        start: rangeStart,
-        end: rangeEnd,
-      });
-    })
-    .reduce((sum, receipt) => sum + receipt.total, 0);
+export interface DateRange {
+  start: Date;
+  end: Date;
 }
 
-export function buildSpendHistory(receipts: Receipt[]): SpendHistoryPoint[] {
+export function resolveDateRange(
+  preset: DateRangePreset,
+  customStart?: string,
+  customEnd?: string,
+): DateRange {
   const now = new Date();
-  const rangeStart = startOfDay(subDays(now, 29));
-  const rangeEnd = endOfDay(now);
 
+  switch (preset) {
+    case 'current-month':
+      return {
+        start: startOfDay(startOfMonth(now)),
+        end: endOfDay(now),
+      };
+    case 'last-month': {
+      const lastMonth = subMonths(now, 1);
+      return {
+        start: startOfDay(startOfMonth(lastMonth)),
+        end: endOfDay(endOfMonth(lastMonth)),
+      };
+    }
+    case 'last-year': {
+      const lastYear = subYears(now, 1);
+      return {
+        start: startOfDay(startOfMonth(new Date(lastYear.getFullYear(), 0, 1))),
+        end: endOfDay(new Date(lastYear.getFullYear(), 11, 31)),
+      };
+    }
+    case 'custom': {
+      const startCandidate = customStart
+        ? startOfDay(parseISO(customStart))
+        : startOfDay(now);
+      const endCandidate = customEnd ? endOfDay(parseISO(customEnd)) : endOfDay(now);
+
+      return startCandidate <= endCandidate
+        ? { start: startCandidate, end: endCandidate }
+        : { start: startOfDay(endCandidate), end: endOfDay(startCandidate) };
+    }
+    case 'last-10-days':
+    default:
+      return {
+        start: startOfDay(subDays(now, 9)),
+        end: endOfDay(now),
+      };
+  }
+}
+
+export function filterReceiptsByDateRange(receipts: Receipt[], range: DateRange) {
+  return receipts.filter((receipt) => {
+    const receiptDate = parseISO(receipt.date);
+    return isWithinInterval(receiptDate, range);
+  });
+}
+
+export function getRangeSpent(receipts: Receipt[], range: DateRange) {
+  const receiptsInRange = filterReceiptsByDateRange(receipts, range);
+
+  return receiptsInRange.reduce((sum, receipt) => sum + receipt.total, 0);
+}
+
+export function buildSpendHistory(
+  receipts: Receipt[],
+  range: DateRange,
+): SpendHistoryPoint[] {
   const dailyTotals = new Map<string, number>();
 
   for (const receipt of receipts) {
     const receiptDate = parseISO(receipt.date);
-    if (
-      !isWithinInterval(receiptDate, {
-        start: rangeStart,
-        end: rangeEnd,
-      })
-    ) {
+    if (!isWithinInterval(receiptDate, range)) {
       continue;
     }
 
@@ -56,7 +109,7 @@ export function buildSpendHistory(receipts: Receipt[]): SpendHistoryPoint[] {
 
   let runningTotal = 0;
 
-  return eachDayOfInterval({ start: rangeStart, end: rangeEnd }).map((day) => {
+  return eachDayOfInterval(range).map((day) => {
     const key = format(day, 'yyyy-MM-dd');
     const spent = dailyTotals.get(key) ?? 0;
     runningTotal += spent;

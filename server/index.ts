@@ -1,11 +1,14 @@
 import dotenv from "dotenv";
-import path from "path";
 import { createApp } from "./app.js";
+import { findEnvFile } from "./paths.js";
 
 const envMode =
   process.env.NODE_ENV === "production" ? "production" : "development";
 
-dotenv.config({ path: path.resolve(process.cwd(), `.env.${envMode}`) });
+const envFilePath = findEnvFile(envMode);
+if (envFilePath) {
+  dotenv.config({ path: envFilePath });
+}
 
 async function startServer() {
   const connectionString = process.env.AZURE_SQL_CONNECTION_STRING;

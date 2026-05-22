@@ -4,16 +4,9 @@
  */
 
 import { useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import {
-  ArrowUpRight,
-  BanknoteArrowDown,
-  Camera,
   Cog,
-  CreditCard,
-  Plus,
   Sparkles,
-  WalletCards,
 } from 'lucide-react';
 import { ErrorAlert } from './components/ErrorAlert';
 import { ImportSummaryBanner } from './components/ImportSummaryBanner';
@@ -28,112 +21,51 @@ import { useCategories } from './hooks/useCategories';
 import { usePaymentRules } from './hooks/usePaymentRules';
 import { useReceiptImport } from './hooks/useReceiptImport';
 import { useReceipts } from './hooks/useReceipts';
-import { buildSpendHistory, getMonthlySpent } from './lib/dashboard';
+import {
+  buildSpendHistory,
+  filterReceiptsByDateRange,
+  resolveDateRange,
+  type DateRangePreset,
+} from './lib/dashboard';
 import { MOCK_ACCOUNTS } from './lib/mockAccounts';
 import type { AccountOverview } from './lib/mockAccounts';
 
-function DashboardMetric({
-  label,
+const CATEGORY_STACK_FALLBACK = ['Einkaufen', 'Essen', 'Gesundheit'];
+const HISTORY_RANGE_OPTIONS: { value: Exclude<DateRangePreset, 'custom'>; label: string }[] =
+  [
+    { value: 'current-month', label: 'Current month' },
+    { value: 'last-month', label: 'Last month' },
+    { value: 'last-year', label: 'Last year' },
+    { value: 'last-10-days', label: 'Last 10 days' },
+  ];
+
+function RangeSelect({
   value,
-  note,
+  onChange,
 }: {
-  label: string;
-  value: string;
-  note: string;
+  value: Exclude<DateRangePreset, 'custom'>;
+  onChange: (value: Exclude<DateRangePreset, 'custom'>) => void;
 }) {
   return (
-    <div className="rounded-[1.7rem] bg-white p-4 shadow-[0_16px_40px_rgba(15,26,84,0.08)]">
-      <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
-        {label}
-      </p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
-        {value}
-      </p>
-      <p className="mt-2 text-sm text-slate-500">{note}</p>
-    </div>
-  );
-}
-
-function QuickAction({
-  icon,
-  label,
-  note,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  note: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="rounded-[1.6rem] bg-white p-4 text-left shadow-[0_16px_40px_rgba(15,26,84,0.08)] transition-transform hover:-translate-y-0.5"
-    >
-      <div className="flex items-start justify-between">
-        <div className="rounded-2xl bg-[#EEF2FF] p-3 text-[#2646FF]">
-          {icon}
-        </div>
-        <ArrowUpRight size={18} className="text-slate-300" />
-      </div>
-      <p className="mt-4 text-base font-semibold text-slate-950">{label}</p>
-      <p className="mt-1 text-sm leading-5 text-slate-500">{note}</p>
-    </button>
-  );
-}
-
-function ReceiptSnapshot({
-  merchant,
-  date,
-  total,
-  currency,
-  category,
-  tags,
-  onClick,
-}: {
-  merchant: string;
-  date: string;
-  total: number;
-  currency: string;
-  category: string;
-  tags: string[];
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full rounded-[1.7rem] bg-white p-4 text-left shadow-[0_16px_40px_rgba(15,26,84,0.08)] transition-transform hover:-translate-y-0.5"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-lg font-semibold text-slate-950">{merchant}</p>
-          <p className="mt-1 text-sm text-slate-500">
-            {new Date(date).toLocaleDateString()}
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-lg font-semibold text-slate-950">
-            {currency} {total.toFixed(2)}
-          </p>
-          <span className="mt-2 inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[10px] uppercase tracking-[0.26em] text-slate-500">
-            {category}
-          </span>
-        </div>
-      </div>
-
-      {tags.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {tags.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-full bg-[#EEF2FF] px-2.5 py-1 text-[11px] font-medium text-[#3150FF]"
-            >
-              #{tag}
-            </span>
-          ))}
-        </div>
-      )}
-    </button>
+    <label className="relative">
+      <span className="sr-only">Select history range</span>
+      <select
+        value={value}
+        onChange={(event) =>
+          onChange(event.target.value as Exclude<DateRangePreset, 'custom'>)
+        }
+        className="appearance-none rounded-full bg-white/12 px-4 py-2 pr-9 text-xs font-semibold text-white/82 outline-none backdrop-blur-sm"
+      >
+        {HISTORY_RANGE_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value} className="text-slate-950">
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/72">
+        ▾
+      </span>
+    </label>
   );
 }
 
@@ -141,6 +73,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isImportHubOpen, setIsImportHubOpen] = useState(false);
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
+  const [historyRange, setHistoryRange] =
+    useState<Exclude<DateRangePreset, 'custom'>>('last-10-days');
+  const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(
+    CATEGORY_STACK_FALLBACK[0],
+  );
   const [activeScreen, setActiveScreen] = useState<'dashboard' | 'config'>(
     'dashboard',
   );
@@ -165,16 +102,30 @@ export default function App() {
     onReviewReceipts: receipts.startReview,
     onClearReview: receipts.clearReview,
   });
-
+  const categoryStackItems =
+    categories.categories.length > 0
+      ? categories.categories.slice(0, 3).map((category) => category.name)
+      : CATEGORY_STACK_FALLBACK;
+  const selectedRange = useMemo(
+    () => resolveDateRange(historyRange),
+    [historyRange],
+  );
+  const activeCategoryName = categoryStackItems.includes(selectedCategoryName ?? '')
+    ? selectedCategoryName
+    : (categoryStackItems[0] ?? null);
+  const activeCategoryReceipts = useMemo(
+    () =>
+      activeCategoryName
+        ? filterReceiptsByDateRange(receipts.receipts, selectedRange).filter(
+            (receipt) => receipt.categoryName === activeCategoryName,
+          )
+        : [],
+    [activeCategoryName, receipts.receipts, selectedRange],
+  );
   const spendHistory = useMemo(
-    () => buildSpendHistory(receipts.receipts),
-    [receipts.receipts],
+    () => buildSpendHistory(receipts.receipts, selectedRange),
+    [receipts.receipts, selectedRange],
   );
-  const monthlySpent = useMemo(
-    () => getMonthlySpent(receipts.receipts),
-    [receipts.receipts],
-  );
-  const remainingBudget = budget.monthlyBudget - monthlySpent;
 
   const handleReviewDelete = () => {
     if (!receipts.selectedReceipt) return;
@@ -222,7 +173,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#eef2ff_0%,#f6f7fb_42%,#edf1ff_100%)] px-3 py-4 text-slate-950 sm:px-6 sm:py-6">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#ffe0ef_0%,#fff1f7_38%,#f7e9ff_100%)] px-3 py-4 text-slate-950 sm:px-6 sm:py-6">
       <input
         type="file"
         ref={fileInputRef}
@@ -239,8 +190,8 @@ export default function App() {
       />
 
       <div
-        className={`mx-auto min-h-[calc(100vh-2rem)] max-w-107.5 overflow-hidden rounded-[2.4rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(245,247,255,0.95))] shadow-[0_35px_120px_rgba(24,39,94,0.18)] backdrop-blur-xl ${
-          imports.isDragging ? 'ring-4 ring-[#2646FF]/20' : ''
+        className={`mx-auto min-h-[calc(100vh-2rem)] max-w-107.5 overflow-hidden rounded-[2.4rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,241,247,0.96))] shadow-[0_35px_120px_rgba(124,40,92,0.16)] backdrop-blur-xl ${
+          imports.isDragging ? 'ring-4 ring-[#FF5FA2]/20' : ''
         }`}
         onDragOver={imports.handleDragOver}
         onDragLeave={imports.handleDragLeave}
@@ -255,8 +206,8 @@ export default function App() {
           <ErrorAlert error={error} onDismiss={() => setError(null)} />
 
           {activeScreen === 'dashboard' ? (
-            <div className="space-y-4">
-              <div className="mb-5 flex items-center justify-between">
+            <div className="space-y-5">
+              <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
                     ClearSpend Mobile
@@ -265,165 +216,111 @@ export default function App() {
                     Dashboard
                   </h1>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setActiveScreen('config')}
-                    className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-[0_12px_28px_rgba(15,26,84,0.12)]"
-                  >
-                    <Cog size={16} />
-                    Config
-                  </button>
-                  <button
-                    onClick={() => setIsAccountsOpen(true)}
-                    className="flex items-center gap-2 rounded-full bg-[#0E1433] px-4 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(14,20,51,0.28)]"
-                  >
-                    <WalletCards size={16} />
-                    Accounts
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-4xl bg-[linear-gradient(135deg,#ffffff_0%,#f3f5ff_100%)] p-4 shadow-[0_18px_50px_rgba(15,26,84,0.1)]">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                      This month
-                    </p>
-                    <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                      EUR {monthlySpent.toFixed(0)}
-                    </p>
-                  </div>
-                  <div className="rounded-full bg-[#EEF2FF] px-3 py-1.5 text-xs font-medium text-[#2646FF]">
-                    30 day window
-                  </div>
-                </div>
-                <SpendHistoryChart points={spendHistory} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <DashboardMetric
-                  label="Initial Budget"
-                  value={`EUR ${budget.monthlyBudget.toFixed(0)}`}
-                  note="Monthly budget baseline"
-                />
-                <DashboardMetric
-                  label="Current Budget"
-                  value={`EUR ${remainingBudget.toFixed(0)}`}
-                  note={
-                    remainingBudget >= 0 ? 'Still available to spend' : 'Currently overspent'
-                  }
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <QuickAction
-                  icon={<Camera size={20} />}
-                  label="Scan"
-                  note="Import receipt images, Amazon orders, or future data sources."
-                  onClick={() => setIsImportHubOpen(true)}
-                />
-                <QuickAction
-                  icon={<BanknoteArrowDown size={20} />}
-                  label="Banking data"
-                  note="Entry point is ready. The bank data flow will be added next."
-                  onClick={handleBankDataClick}
-                />
-                <QuickAction
-                  icon={<CreditCard size={20} />}
-                  label="All accounts"
-                  note="Open the full connected accounts overview with expandable details."
-                  onClick={() => setIsAccountsOpen(true)}
-                />
-                <QuickAction
-                  icon={<Plus size={20} />}
-                  label="Manual receipt"
-                  note="Create a new expense entry and adjust the extracted details yourself."
-                  onClick={receipts.handleManualEntry}
-                />
-              </div>
-
-              <div className="rounded-4xl bg-[#0E1433] px-4 py-4 text-white shadow-[0_22px_64px_rgba(14,20,51,0.26)]">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/55">
-                      Accounts preview
-                    </p>
-                    <h2 className="mt-2 text-xl font-semibold">
-                      Stackable overview
-                    </h2>
-                    <p className="mt-2 text-sm leading-6 text-white/68">
-                      Tap to expand the full list of available accounts and inspect the details.
-                    </p>
-                  </div>
-                  <Sparkles size={18} className="mt-1 text-white/70" />
-                </div>
-
                 <button
-                  onClick={() => setIsAccountsOpen(true)}
-                  className="mt-4 flex w-full flex-col gap-3 rounded-[1.7rem] bg-white/7 p-3 text-left"
+                  onClick={() => setActiveScreen('config')}
+                  aria-label="Open configuration"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#9B2C66] shadow-[0_12px_28px_rgba(155,44,102,0.14)]"
                 >
-                  {accounts.slice(0, 3).map((account, index) => (
-                    <div
-                      key={account.id}
-                      className={`rounded-[1.4rem] bg-linear-to-br ${account.accent} p-3 shadow-[0_16px_36px_rgba(18,24,62,0.28)] ${
-                        index > 0 ? '-mt-3' : ''
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-[0.24em] text-white/65">
-                            {account.bank}
-                          </p>
-                          <p className="mt-1 text-base font-semibold">{account.name}</p>
-                        </div>
-                        <p className="text-sm text-white/78">{account.balance}</p>
-                      </div>
-                    </div>
-                  ))}
+                  <Cog size={18} />
                 </button>
               </div>
 
-              <section className="pt-2">
-                <div className="mb-3 flex items-center justify-between">
+              <SpendHistoryChart
+                points={spendHistory}
+                rangeLabel={
+                  HISTORY_RANGE_OPTIONS.find((option) => option.value === historyRange)
+                    ?.label ?? 'Last 10 days'
+                }
+                headerAction={
+                  <RangeSelect value={historyRange} onChange={setHistoryRange} />
+                }
+              />
+
+              <div
+                className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-4 text-left text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]"
+              >
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                      Recent receipts
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                      Kategorien
                     </p>
-                    <h2 className="mt-1 text-xl font-semibold text-slate-950">
-                      Spending overview
-                    </h2>
                   </div>
-                  <div className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500 shadow-sm">
-                    {receipts.filteredReceipts.length} items
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={18} className="text-[#FFD0E6]" />
+                    <RangeSelect value={historyRange} onChange={setHistoryRange} />
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  {receipts.filteredReceipts.length === 0 ? (
-                    <div className="rounded-[1.8rem] bg-white p-5 text-center shadow-[0_16px_40px_rgba(15,26,84,0.08)]">
-                      <p className="text-base font-medium text-slate-950">
-                        No receipts yet
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-500">
-                        Start with the Scan action above to import receipts or Amazon data into the dashboard.
-                      </p>
-                    </div>
-                  ) : (
-                    receipts.filteredReceipts.map((receipt) => (
-                      <ReceiptSnapshot
-                        key={receipt.id}
-                        merchant={receipt.merchant}
-                        date={receipt.date}
-                        total={receipt.total}
-                        currency={receipt.currency}
-                        category={receipt.categoryName}
-                        tags={receipt.tags}
-                        onClick={() => receipts.setSelectedReceipt(receipt)}
-                      />
-                    ))
-                  )}
+                <div className="mt-3 flex w-full flex-col gap-3 rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
+                  {categoryStackItems.map((categoryName, index) => (
+                    <button
+                      type="button"
+                      key={categoryName}
+                      onClick={() => setSelectedCategoryName(categoryName)}
+                      className={`rounded-[1.4rem] bg-linear-to-br ${
+                        accounts[index % accounts.length]?.accent ??
+                        'from-[#FF5FA2] via-[#FF78B5] to-[#FF9BCB]'
+                      } p-3 text-left shadow-[0_16px_36px_rgba(114,29,83,0.28)] transition-transform ${
+                        activeCategoryName === categoryName
+                          ? 'ring-2 ring-white/60'
+                          : ''
+                      } ${
+                        index > 0 ? '-mt-3' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-[0.24em] text-white/65">
+                            Receipt mapping
+                          </p>
+                          <p className="mt-1 text-base font-semibold">{categoryName}</p>
+                        </div>
+                        <p className="text-sm text-white/78">Kategorie</p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              </section>
+
+                <div className="mt-4 rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                      {activeCategoryName ?? 'Kategorie'}
+                    </p>
+                    <p className="text-xs text-white/72">
+                      {activeCategoryReceipts.length} items
+                    </p>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {activeCategoryReceipts.length === 0 ? (
+                      <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
+                        No receipt items for this category yet.
+                      </div>
+                    ) : (
+                      activeCategoryReceipts.map((receipt) => (
+                        <button
+                          key={receipt.id}
+                          type="button"
+                          onClick={() => receipts.setSelectedReceipt(receipt)}
+                          className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-white">
+                              {receipt.merchant}
+                            </p>
+                            <p className="mt-1 text-xs text-white/68">
+                              {new Date(receipt.date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <p className="text-sm font-medium text-white/82">
+                            {receipt.currency} {receipt.total.toFixed(2)}
+                          </p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <ConfigPage
