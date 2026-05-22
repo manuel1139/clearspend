@@ -71,7 +71,7 @@ function QuickAction({
       className="rounded-[1.6rem] bg-white p-4 text-left shadow-[0_16px_40px_rgba(15,26,84,0.08)] transition-transform hover:-translate-y-0.5"
     >
       <div className="flex items-start justify-between">
-        <div className="rounded-[1rem] bg-[#EEF2FF] p-3 text-[#2646FF]">
+        <div className="rounded-2xl bg-[#EEF2FF] p-3 text-[#2646FF]">
           {icon}
         </div>
         <ArrowUpRight size={18} className="text-slate-300" />
@@ -239,7 +239,7 @@ export default function App() {
       />
 
       <div
-        className={`mx-auto min-h-[calc(100vh-2rem)] max-w-[430px] overflow-hidden rounded-[2.4rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(245,247,255,0.95))] shadow-[0_35px_120px_rgba(24,39,94,0.18)] backdrop-blur-xl ${
+        className={`mx-auto min-h-[calc(100vh-2rem)] max-w-107.5 overflow-hidden rounded-[2.4rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(245,247,255,0.95))] shadow-[0_35px_120px_rgba(24,39,94,0.18)] backdrop-blur-xl ${
           imports.isDragging ? 'ring-4 ring-[#2646FF]/20' : ''
         }`}
         onDragOver={imports.handleDragOver}
@@ -283,7 +283,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="rounded-[2rem] bg-[linear-gradient(135deg,#ffffff_0%,#f3f5ff_100%)] p-4 shadow-[0_18px_50px_rgba(15,26,84,0.1)]">
+              <div className="rounded-4xl bg-[linear-gradient(135deg,#ffffff_0%,#f3f5ff_100%)] p-4 shadow-[0_18px_50px_rgba(15,26,84,0.1)]">
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
@@ -342,7 +342,7 @@ export default function App() {
                 />
               </div>
 
-              <div className="rounded-[2rem] bg-[#0E1433] px-4 py-4 text-white shadow-[0_22px_64px_rgba(14,20,51,0.26)]">
+              <div className="rounded-4xl bg-[#0E1433] px-4 py-4 text-white shadow-[0_22px_64px_rgba(14,20,51,0.26)]">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.28em] text-white/55">
@@ -365,7 +365,7 @@ export default function App() {
                   {accounts.slice(0, 3).map((account, index) => (
                     <div
                       key={account.id}
-                      className={`rounded-[1.4rem] bg-gradient-to-br ${account.accent} p-3 shadow-[0_16px_36px_rgba(18,24,62,0.28)] ${
+                      className={`rounded-[1.4rem] bg-linear-to-br ${account.accent} p-3 shadow-[0_16px_36px_rgba(18,24,62,0.28)] ${
                         index > 0 ? '-mt-3' : ''
                       }`}
                     >
@@ -475,9 +475,9 @@ export default function App() {
 
       {(imports.isScanning || receipts.selectedReceipt) && (
         <div className="fixed inset-0 z-40 flex items-end bg-[#08102E]/40 p-3 sm:p-6">
-          <div className="mx-auto w-full max-w-[28rem]">
+          <div className="mx-auto w-full max-w-md">
             {imports.isScanning ? (
-              <div className="rounded-[2rem] bg-[#0E1433] px-6 py-8 text-white shadow-[0_28px_80px_rgba(8,16,46,0.35)]">
+              <div className="rounded-4xl bg-[#0E1433] px-6 py-8 text-white shadow-[0_28px_80px_rgba(8,16,46,0.35)]">
                 <p className="text-[11px] uppercase tracking-[0.28em] text-white/55">
                   Scanning
                 </p>

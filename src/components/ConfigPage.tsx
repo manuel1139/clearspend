@@ -1,5 +1,5 @@
 import { Landmark, PencilLine, Plus, Settings2, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { AccountOverview } from '../lib/mockAccounts';
 import type { ReceiptCategory } from '../types';
 
@@ -44,53 +44,31 @@ export function ConfigPage({
   onSaveCategory,
   onDeleteCategory,
 }: ConfigPageProps) {
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(
-    accounts[0]?.id ?? createEmptyAccount().id,
-  );
   const [draftAccount, setDraftAccount] = useState<AccountOverview>(
     accounts[0] ?? createEmptyAccount(),
   );
-  const [budgetInput, setBudgetInput] = useState(monthlyBudget.toString());
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(
-    categories[0]?.id ?? null,
+  const [budgetInput, setBudgetInput] = useState<string | null>(null);
+  const [draftCategory, setDraftCategory] = useState<
+    Partial<ReceiptCategory> & Pick<ReceiptCategory, 'name'>
+  >(
+    categories[0]
+      ? { id: categories[0].id, name: categories[0].name }
+      : { name: '' },
   );
-  const [categoryNameInput, setCategoryNameInput] = useState(
-    categories[0]?.name ?? '',
-  );
 
-  useEffect(() => {
-    setBudgetInput(monthlyBudget.toString());
-  }, [monthlyBudget]);
-
-  useEffect(() => {
-    if (accounts.length === 0) {
-      const nextAccount = createEmptyAccount();
-      setSelectedAccountId(nextAccount.id);
-      setDraftAccount(nextAccount);
-      return;
-    }
-
-    const selectedAccount =
-      accounts.find((account) => account.id === selectedAccountId) ?? accounts[0];
-
-    setSelectedAccountId(selectedAccount.id);
-    setDraftAccount(selectedAccount);
-  }, [accounts, selectedAccountId]);
-
-  useEffect(() => {
-    if (categories.length === 0) {
-      setSelectedCategoryId(null);
-      setCategoryNameInput('');
-      return;
-    }
-
-    const selectedCategory =
-      categories.find((category) => category.id === selectedCategoryId) ??
-      categories[0];
-
-    setSelectedCategoryId(selectedCategory.id);
-    setCategoryNameInput(selectedCategory.name);
-  }, [categories, selectedCategoryId]);
+  const displayedAccount = accounts.some(
+    (account) => account.id === draftAccount.id,
+  )
+    ? draftAccount
+    : (accounts[0] ?? createEmptyAccount());
+  const activeAccountId = displayedAccount.id;
+  const displayedBudgetInput = budgetInput ?? monthlyBudget.toString();
+  const displayedCategory =
+    (draftCategory.id !== undefined
+      ? categories.find((category) => category.id === draftCategory.id)
+      : null) ??
+    (categories[0] ? { id: categories[0].id, name: categories[0].name } : null) ??
+    draftCategory;
 
   const handleFieldChange =
     (field: keyof AccountOverview) =>
@@ -104,29 +82,28 @@ export function ConfigPage({
 
   const handleNewAccount = () => {
     const nextAccount = createEmptyAccount();
-    setSelectedAccountId(nextAccount.id);
     setDraftAccount(nextAccount);
   };
 
   const handleCategorySave = async () => {
-    if (!categoryNameInput.trim()) return;
+    if (!displayedCategory.name.trim()) return;
 
     await onSaveCategory({
-      id: selectedCategoryId ?? undefined,
-      name: categoryNameInput.trim(),
+      id: displayedCategory.id,
+      name: displayedCategory.name.trim(),
     });
   };
 
   const isExistingAccount = accounts.some(
-    (account) => account.id === draftAccount.id,
+    (account) => account.id === displayedAccount.id,
   );
   const isExistingCategory = categories.some(
-    (category) => category.id === selectedCategoryId,
+    (category) => category.id === displayedCategory.id,
   );
 
   return (
     <div className="space-y-5">
-      <div className="rounded-[2rem] bg-[linear-gradient(135deg,#0E1433_0%,#1E2B6F_100%)] p-5 text-white shadow-[0_24px_70px_rgba(14,20,51,0.24)]">
+      <div className="rounded-4xl bg-[linear-gradient(135deg,#0E1433_0%,#1E2B6F_100%)] p-5 text-white shadow-[0_24px_70px_rgba(14,20,51,0.24)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.28em] text-white/55">
@@ -166,13 +143,16 @@ export function ConfigPage({
           <input
             type="number"
             min="0"
-            value={budgetInput}
+            value={displayedBudgetInput}
             onChange={(event) => setBudgetInput(event.target.value)}
             className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-slate-950 outline-none transition focus:border-[#2646FF]"
             placeholder="1000"
           />
           <button
-            onClick={() => onSaveBudget(Number(budgetInput) || 0)}
+            onClick={() => {
+              onSaveBudget(Number(displayedBudgetInput) || 0);
+              setBudgetInput(null);
+            }}
             className="rounded-[1.2rem] bg-[#2646FF] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(38,70,255,0.24)]"
           >
             Save
@@ -202,16 +182,15 @@ export function ConfigPage({
 
           <div className="space-y-3">
             {accounts.map((account) => {
-              const isActive = account.id === selectedAccountId;
+              const isActive = account.id === activeAccountId;
               return (
                 <button
                   key={account.id}
                   type="button"
                   onClick={() => {
-                    setSelectedAccountId(account.id);
                     setDraftAccount(account);
                   }}
-                  className={`w-full rounded-[1.5rem] border p-4 text-left transition ${
+                  className={`w-full rounded-3xl border p-4 text-left transition ${
                     isActive
                       ? 'border-[#2646FF] bg-[#EEF2FF]'
                       : 'border-slate-200 bg-slate-50 hover:border-slate-300'
@@ -220,7 +199,7 @@ export function ConfigPage({
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div
-                        className={`rounded-[1rem] bg-gradient-to-br ${account.accent} p-3 text-white`}
+                        className={`rounded-2xl bg-linear-to-br ${account.accent} p-3 text-white`}
                       >
                         <Landmark size={16} />
                       </div>
@@ -242,7 +221,7 @@ export function ConfigPage({
             })}
 
             {accounts.length === 0 && (
-              <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
                 No accounts yet. Create the first one from the form.
               </div>
             )}
@@ -268,7 +247,7 @@ export function ConfigPage({
                 Account name
               </span>
               <input
-                value={draftAccount.name}
+                value={displayedAccount.name}
                 onChange={handleFieldChange('name')}
                 className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
                 placeholder="Main Budget"
@@ -280,7 +259,7 @@ export function ConfigPage({
                 Bank
               </span>
               <input
-                value={draftAccount.bank}
+                value={displayedAccount.bank}
                 onChange={handleFieldChange('bank')}
                 className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
                 placeholder="Sparkasse"
@@ -292,7 +271,7 @@ export function ConfigPage({
                 Balance
               </span>
               <input
-                value={draftAccount.balance}
+                value={displayedAccount.balance}
                 onChange={handleFieldChange('balance')}
                 className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
                 placeholder="EUR 1200"
@@ -304,7 +283,7 @@ export function ConfigPage({
                 Available
               </span>
               <input
-                value={draftAccount.available}
+                value={displayedAccount.available}
                 onChange={handleFieldChange('available')}
                 className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
                 placeholder="EUR 1200"
@@ -316,7 +295,7 @@ export function ConfigPage({
                 Masked IBAN
               </span>
               <input
-                value={draftAccount.ibanMasked}
+                value={displayedAccount.ibanMasked}
                 onChange={handleFieldChange('ibanMasked')}
                 className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
                 placeholder="DE89 **** 2294"
@@ -328,7 +307,7 @@ export function ConfigPage({
                 Sync label
               </span>
               <input
-                value={draftAccount.syncedAt}
+                value={displayedAccount.syncedAt}
                 onChange={handleFieldChange('syncedAt')}
                 className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
                 placeholder="Synced 08:42"
@@ -341,7 +320,7 @@ export function ConfigPage({
               Detail
             </span>
             <textarea
-              value={draftAccount.detail}
+              value={displayedAccount.detail}
               onChange={handleFieldChange('detail')}
               rows={4}
               className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
@@ -351,7 +330,7 @@ export function ConfigPage({
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             <button
-              onClick={() => onDeleteAccount(draftAccount.id)}
+              onClick={() => onDeleteAccount(displayedAccount.id)}
               disabled={!isExistingAccount}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -360,7 +339,7 @@ export function ConfigPage({
             </button>
 
             <button
-              onClick={() => onSaveAccount(draftAccount)}
+              onClick={() => onSaveAccount(displayedAccount)}
               className="inline-flex items-center gap-2 rounded-full bg-[#0E1433] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(14,20,51,0.22)]"
             >
               {isExistingAccount ? 'Save changes' : 'Create account'}
@@ -382,8 +361,7 @@ export function ConfigPage({
             </div>
             <button
               onClick={() => {
-                setSelectedCategoryId(null);
-                setCategoryNameInput('');
+                setDraftCategory({ name: '' });
               }}
               className="inline-flex items-center gap-2 rounded-full bg-[#EEF2FF] px-3 py-2 text-sm font-medium text-[#2646FF]"
             >
@@ -394,16 +372,15 @@ export function ConfigPage({
 
           <div className="space-y-3">
             {categories.map((category) => {
-              const isActive = category.id === selectedCategoryId;
+              const isActive = category.id === displayedCategory.id;
               return (
                 <button
                   key={category.id}
                   type="button"
                   onClick={() => {
-                    setSelectedCategoryId(category.id);
-                    setCategoryNameInput(category.name);
+                    setDraftCategory({ id: category.id, name: category.name });
                   }}
-                  className={`w-full rounded-[1.5rem] border px-4 py-3 text-left transition ${
+                  className={`w-full rounded-3xl border px-4 py-3 text-left transition ${
                     isActive
                       ? 'border-[#2646FF] bg-[#EEF2FF]'
                       : 'border-slate-200 bg-slate-50 hover:border-slate-300'
@@ -436,8 +413,13 @@ export function ConfigPage({
               Name
             </span>
             <input
-              value={categoryNameInput}
-              onChange={(event) => setCategoryNameInput(event.target.value)}
+              value={displayedCategory.name}
+              onChange={(event) =>
+                setDraftCategory((current) => ({
+                  ...current,
+                  name: event.target.value,
+                }))
+              }
               className="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-[#2646FF]"
               placeholder="Groceries"
             />
@@ -446,8 +428,8 @@ export function ConfigPage({
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             <button
               onClick={() =>
-                selectedCategoryId !== null
-                  ? onDeleteCategory(selectedCategoryId)
+                displayedCategory.id !== undefined
+                  ? onDeleteCategory(displayedCategory.id)
                   : undefined
               }
               disabled={!isExistingCategory}

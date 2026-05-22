@@ -31,7 +31,7 @@ export function AccountsDrawer({
             initial={{ y: 24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
-            className="mx-auto w-full max-w-[28rem] rounded-[2rem] bg-[#F6F7FB] p-4 shadow-[0_28px_80px_rgba(8,16,46,0.35)]"
+            className="mx-auto w-full max-w-md rounded-4xl bg-[#F6F7FB] p-4 shadow-[0_28px_80px_rgba(8,16,46,0.35)]"
           >
             <div className="mb-4 flex items-center justify-between">
               <div>
@@ -61,7 +61,7 @@ export function AccountsDrawer({
                     onClick={() =>
                       setExpandedAccountId(isExpanded ? null : account.id)
                     }
-                    className={`w-full overflow-hidden rounded-[1.8rem] bg-gradient-to-br ${account.accent} px-4 py-4 text-left text-white shadow-[0_16px_40px_rgba(31,60,255,0.2)]`}
+                    className={`w-full overflow-hidden rounded-[1.8rem] bg-linear-to-br ${account.accent} px-4 py-4 text-left text-white shadow-[0_16px_40px_rgba(31,60,255,0.2)]`}
                     style={{
                       marginTop: index === 0 ? 0 : -14,
                     }}

@@ -74,7 +74,7 @@ export function ImportHubModal({
             initial={{ y: 28, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 28, opacity: 0 }}
-            className="mx-auto w-full max-w-[28rem] rounded-[2rem] bg-[#F6F7FB] p-4 shadow-[0_28px_80px_rgba(8,16,46,0.35)]"
+            className="mx-auto w-full max-w-md rounded-4xl bg-[#F6F7FB] p-4 shadow-[0_28px_80px_rgba(8,16,46,0.35)]"
           >
             <div className="mb-4 flex items-center justify-between">
               <div>

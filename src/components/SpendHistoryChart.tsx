@@ -29,7 +29,7 @@ export function SpendHistoryChart({ points }: SpendHistoryChartProps) {
     .filter(Boolean);
 
   return (
-    <div className="rounded-[2rem] bg-[#0E1433] p-5 text-white shadow-[0_24px_80px_rgba(15,27,84,0.28)]">
+    <div className="rounded-4xl bg-[#0E1433] p-5 text-white shadow-[0_24px_80px_rgba(15,27,84,0.28)]">
       <div className="mb-5 flex items-start justify-between">
         <div>
           <p className="text-[11px] uppercase tracking-[0.28em] text-white/55">

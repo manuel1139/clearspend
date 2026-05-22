@@ -25,7 +25,7 @@ export function ReceiptReviewPanel({
   return (
     <div className="sticky top-28">
       {isScanning ? (
-        <div className="bg-white p-8 rounded-4xl border border-gray-100 shadow-xl flex flex-col items-center justify-center min-h-100">
+        <div className="flex min-h-100 flex-col items-center justify-center rounded-4xl border border-gray-100 bg-white p-8 shadow-xl">
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
@@ -41,7 +41,7 @@ export function ReceiptReviewPanel({
       ) : selectedReceipt ? (
         <div className="space-y-4">
           {reviewQueue.length > 1 && (
-            <div className="bg-black text-white px-6 py-3 rounded-full flex items-center justify-between text-xs font-bold shadow-xl">
+            <div className="flex items-center justify-between rounded-full bg-black px-6 py-3 text-xs font-bold text-white shadow-xl">
               <span>MEHRERE BELEGE ERKANNT</span>
               <span>
                 {reviewQueue.findIndex((receipt) => receipt.id === selectedReceipt.id) + 1}{' '}
@@ -59,8 +59,8 @@ export function ReceiptReviewPanel({
           />
         </div>
       ) : (
-        <div className="bg-gray-200/50 rounded-[2rem] border-2 border-dashed border-gray-300 flex flex-col items-center justify-center min-h-[400px] p-8 text-center">
-          <div className="bg-white p-4 rounded-3xl shadow-sm mb-4">
+        <div className="flex min-h-100 flex-col items-center justify-center rounded-4xl border-2 border-dashed border-gray-300 bg-gray-200/50 p-8 text-center">
+          <div className="mb-4 rounded-3xl bg-white p-4 shadow-sm">
             <TagIcon className="text-gray-300" size={32} />
           </div>
           <h3 className="text-lg font-bold text-gray-700">Scan-Zusammenfassung</h3>

@@ -273,7 +273,7 @@ export function ReceiptCard({
             </label>
             <div
               className={`relative overflow-hidden rounded-3xl border border-gray-100 bg-gray-50 ${
-                receipt.box_2d ? 'aspect-4/3' : 'aspect-video'
+                receipt.box_2d ? 'aspect-[4/3]' : 'aspect-video'
               }`}
             >
               {receipt.box_2d ? (

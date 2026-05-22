@@ -17,17 +17,17 @@ export function AppHeader({
   onCsvUpload,
 }: AppHeaderProps) {
   return (
-    <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-bottom border-gray-100 px-6 py-4 flex items-center justify-between">
+    <header className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white/80 px-6 py-4 backdrop-blur-md">
       <div className="flex items-center gap-2">
-        <div className="bg-[#1A1A1A] p-2 rounded-xl">
-          <ReceiptIcon className="text-white w-6 h-6" />
+        <div className="rounded-xl bg-[#1A1A1A] p-2">
+          <ReceiptIcon className="h-6 w-6 text-white" />
         </div>
         <h1 className="text-xl font-bold tracking-tight">ClearSpend</h1>
       </div>
       <div className="flex items-center gap-3">
         <button
           onClick={() => csvInputRef.current?.click()}
-          className="flex bg-gray-100 text-gray-700 px-4 py-2 rounded-full font-medium items-center gap-2 hover:bg-gray-200 transition-all font-mono text-sm"
+          className="flex items-center gap-2 rounded-full bg-gray-100 px-4 py-2 font-mono text-sm font-medium text-gray-700 transition-all hover:bg-gray-200"
         >
           <FileText size={16} />
           <span className="hidden sm:inline">Upload CSV</span>
@@ -35,7 +35,7 @@ export function AppHeader({
         </button>
         <button
           onClick={onManualEntry}
-          className="flex bg-gray-100 text-gray-700 px-4 py-2 rounded-full font-medium items-center gap-2 hover:bg-gray-200 transition-all font-mono text-sm"
+          className="flex items-center gap-2 rounded-full bg-gray-100 px-4 py-2 font-mono text-sm font-medium text-gray-700 transition-all hover:bg-gray-200"
         >
           <Plus size={16} />
           <span className="hidden sm:inline">Manuelle Eingabe</span>
@@ -43,7 +43,7 @@ export function AppHeader({
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="bg-[#1A1A1A] text-white px-4 py-2 rounded-full font-medium flex items-center gap-2 hover:bg-black transition-all shadow-lg shadow-black/10"
+          className="flex items-center gap-2 rounded-full bg-[#1A1A1A] px-4 py-2 font-medium text-white shadow-lg shadow-black/10 transition-all hover:bg-black"
           id="scan-button"
         >
           <Camera size={18} />

@@ -39,7 +39,7 @@ export function BudgetWidget({
       animate={{ x: 0, opacity: 1 }}
       className="fixed bottom-8 right-8 z-50 pointer-events-none"
     >
-      <div className="bg-white rounded-[2rem] shadow-2xl border border-gray-100 p-6 w-72 pointer-events-auto">
+      <div className="w-72 pointer-events-auto rounded-4xl border border-gray-100 bg-white p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400">
             Monatsbudget
