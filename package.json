@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build",
-    "start": "NODE_ENV=production tsx server.ts",
+    "dev": "npm --prefix server run dev",
+    "build": "vite build && npm --prefix server run build",
+    "start": "npm --prefix server run start",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && npm --prefix server run lint",
     "lint:eslint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

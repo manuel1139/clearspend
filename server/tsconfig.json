@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "jsx": "preserve",
+    "paths": {},
+    "types": ["node"],
+    "allowJs": false
+  },
+  "include": ["./**/*.ts", "../shared/**/*.ts"],
+  "exclude": ["../src/**/*", "../dist/**/*", "../node_modules/**/*"]
+}

@@ -1,5 +1,5 @@
 import sql from 'mssql';
-import type { PaymentRule, Receipt, ReceiptCategory } from '../types';
+import type { PaymentRule, Receipt, ReceiptCategory } from '../shared/types.js';
 
 const DEFAULT_CATEGORIES = [
   'Essen',
@@ -363,10 +363,7 @@ export async function listReceipts(pool: sql.ConnectionPool) {
   return result.recordset.map(mapReceiptRecord);
 }
 
-export async function getReceiptById(
-  pool: sql.ConnectionPool,
-  id: string,
-) {
+export async function getReceiptById(pool: sql.ConnectionPool, id: string) {
   const result = await pool.request().input('id', sql.NVarChar, id).query(`
     SELECT
       Receipts.id,
@@ -394,10 +391,7 @@ export async function getReceiptById(
   return record ? mapReceiptRecord(record) : null;
 }
 
-export async function saveReceipt(
-  pool: sql.ConnectionPool,
-  receipt: Receipt,
-) {
+export async function saveReceipt(pool: sql.ConnectionPool, receipt: Receipt) {
   const isUpdate = receipt.id && !receipt.id.startsWith('temp-');
 
   if (isUpdate) {
