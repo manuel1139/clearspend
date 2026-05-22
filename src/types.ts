@@ -5,13 +5,28 @@ export interface ReceiptItem {
   imageUrl?: string;
 }
 
+export interface ReceiptCategory {
+  id: number;
+  name: string;
+}
+
+export interface PaymentRule {
+  id: number;
+  name: string;
+  frequency: 'monthly' | 'yearly' | 'one_time';
+}
+
 export interface Receipt {
   id: string;
   merchant: string;
   date: string;
   total: number;
   currency: string;
-  category: string;
+  categoryId: number;
+  categoryName: string;
+  paymentRuleId: number;
+  paymentRuleName: string;
+  paymentRuleFrequency: PaymentRule['frequency'];
   tags: string[];
   items?: ReceiptItem[];
   createdAt: string;
@@ -19,5 +34,17 @@ export interface Receipt {
   box_2d?: [number, number, number, number]; // [ymin, xmin, ymax, xmax]
 }
 
-export type ScannedReceipt = Pick<Receipt, 'merchant' | 'total' | 'category'> &
-  Partial<Pick<Receipt, 'date' | 'currency' | 'items' | 'box_2d'>>;
+export interface ScannedReceipt {
+  merchant: string;
+  total: number;
+  category: string;
+  date?: string;
+  currency?: string;
+  items?: ReceiptItem[];
+  box_2d?: [number, number, number, number];
+}
+
+export interface ImportSummary {
+  imported: number;
+  skipped: number;
+}

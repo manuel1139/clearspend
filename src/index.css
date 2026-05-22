@@ -1,14 +1,26 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    @apply bg-[#eef2ff];
+  }
+
   body {
-    @apply bg-[#F8F9FA] text-[#1A1A1A] antialiased;
+    @apply min-h-screen bg-[radial-gradient(circle_at_top,#eef2ff_0%,#f6f7fb_45%,#edf1ff_100%)] text-[#1A1A1A] antialiased;
+  }
+
+  button {
+    @apply cursor-pointer;
   }
 }
 

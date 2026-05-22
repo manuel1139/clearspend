@@ -1,14 +1,27 @@
-import express from "express";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import { fileURLToPath } from "url";
-import dotenv from "dotenv";
-import sql from "mssql";
-import type { Receipt } from "./src/types";
+import dotenv from 'dotenv';
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createServer as createViteServer } from 'vite';
+import type { Receipt, ReceiptCategory } from './src/types';
+import {
+  countReceiptsByCategory,
+  deleteCategory,
+  deleteReceipt,
+  getBudget,
+  initializeDatabase,
+  listPaymentRules,
+  listReceiptCategories,
+  listReceipts,
+  saveCategory,
+  saveReceipt,
+  updateBudget,
+} from './src/server/database';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const envMode = process.env.NODE_ENV === "production" ? "production" : "development";
+const envMode =
+  process.env.NODE_ENV === 'production' ? 'production' : 'development';
 
 dotenv.config({ path: path.resolve(process.cwd(), `.env.${envMode}`) });
 
@@ -20,168 +33,134 @@ async function startServer() {
 
   const connectionString = process.env.AZURE_SQL_CONNECTION_STRING;
   if (!connectionString) {
-    throw new Error(`AZURE_SQL_CONNECTION_STRING is required in .env.${envMode} or the process environment`);
+    throw new Error(
+      `AZURE_SQL_CONNECTION_STRING is required in .env.${envMode} or the process environment`,
+    );
   }
 
-  const pool = await sql.connect(connectionString);
-  console.log("Connected to Azure SQL Database");
-  
-  // Basic table check/creation
-  await pool.request().query(`
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Receipts' AND xtype='U')
-    CREATE TABLE Receipts (
-      id NVARCHAR(50) PRIMARY KEY,
-      merchant NVARCHAR(255),
-      date NVARCHAR(50),
-      total FLOAT,
-      currency NVARCHAR(10),
-      category NVARCHAR(50),
-      tags NVARCHAR(MAX),
-      items NVARCHAR(MAX),
-      createdAt NVARCHAR(50),
-      imageUrl NVARCHAR(MAX),
-      box_2d NVARCHAR(255)
-    )
+  const pool = await initializeDatabase(connectionString);
+  console.log('Connected to Azure SQL Database');
 
-    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AppSettings' AND xtype='U')
-    CREATE TABLE AppSettings (
-      keyName NVARCHAR(50) PRIMARY KEY,
-      value NVARCHAR(MAX)
-    )
-  `);
-
-  // API Routes for settings
-  app.get("/api/settings/budget", async (req, res) => {
+  app.get('/api/settings/budget', async (_req, res) => {
     try {
-      const result = await pool.request().input('key', sql.NVarChar, 'monthly_budget').query("SELECT value FROM AppSettings WHERE keyName = @key");
-      res.json({ budget: result.recordset[0]?.value || "1000" });
+      res.json({ budget: await getBudget(pool) });
     } catch {
-      res.status(500).json({ error: "Failed to load budget" });
+      res.status(500).json({ error: 'Failed to load budget' });
     }
   });
 
-  app.post("/api/settings/budget", async (req, res) => {
+  app.post('/api/settings/budget', async (req, res) => {
     try {
       const { budget } = req.body;
-      await pool.request()
-        .input('key', sql.NVarChar, 'monthly_budget')
-        .input('val', sql.NVarChar, budget.toString())
-        .query(`
-          IF EXISTS (SELECT * FROM AppSettings WHERE keyName = @key)
-            UPDATE AppSettings SET value = @val WHERE keyName = @key
-          ELSE
-            INSERT INTO AppSettings (keyName, value) VALUES (@key, @val)
-        `);
+      await updateBudget(pool, budget);
       res.json({ success: true });
     } catch {
-      res.status(500).json({ error: "Failed to save budget" });
+      res.status(500).json({ error: 'Failed to save budget' });
     }
   });
 
-  // API Routes
-  app.get("/api/receipts", async (req, res) => {
+  app.get('/api/categories', async (_req, res) => {
     try {
-      const result = await pool.request().query("SELECT * FROM Receipts ORDER BY createdAt DESC");
-      const formatted = result.recordset.map(r => ({
-        ...r,
-        tags: JSON.parse(r.tags || '[]'),
-        items: JSON.parse(r.items || '[]'),
-        box_2d: JSON.parse(r.box_2d || 'null')
-      }));
-      res.json(formatted);
+      res.json(await listReceiptCategories(pool));
     } catch {
-      res.status(500).json({ error: "Failed to read receipts" });
+      res.status(500).json({ error: 'Failed to load categories' });
     }
   });
 
-  app.post("/api/receipts", async (req, res) => {
+  app.get('/api/payment-rules', async (_req, res) => {
     try {
-      const { receipt } = req.body as { receipt: Receipt };
-      const isUpdate = receipt.id && !receipt.id.startsWith('temp-');
+      res.json(await listPaymentRules(pool));
+    } catch {
+      res.status(500).json({ error: 'Failed to load payment rules' });
+    }
+  });
 
-      if (isUpdate) {
-        await pool.request()
-          .input('id', sql.NVarChar, receipt.id)
-          .input('merchant', sql.NVarChar, receipt.merchant)
-          .input('date', sql.NVarChar, receipt.date)
-          .input('total', sql.Float, receipt.total)
-          .input('currency', sql.NVarChar, receipt.currency)
-          .input('category', sql.NVarChar, receipt.category)
-          .input('tags', sql.NVarChar, JSON.stringify(receipt.tags || []))
-          .input('items', sql.NVarChar, JSON.stringify(receipt.items || []))
-          .input('imageUrl', sql.NVarChar, receipt.imageUrl || '')
-          .input('box_2d', sql.NVarChar, JSON.stringify(receipt.box_2d || null))
-          .query(`
-            UPDATE Receipts SET 
-              merchant = @merchant,
-              date = @date,
-              total = @total,
-              currency = @currency,
-              category = @category,
-              tags = @tags,
-              items = @items,
-              imageUrl = @imageUrl,
-              box_2d = @box_2d
-            WHERE id = @id
-          `);
-        return res.json(receipt);
-      } else {
-        const newId = !receipt.id || receipt.id.startsWith('temp-') ? Date.now().toString() : receipt.id;
-        await pool.request()
-          .input('id', sql.NVarChar, newId)
-          .input('merchant', sql.NVarChar, receipt.merchant)
-          .input('date', sql.NVarChar, receipt.date)
-          .input('total', sql.Float, receipt.total)
-          .input('currency', sql.NVarChar, receipt.currency)
-          .input('category', sql.NVarChar, receipt.category)
-          .input('tags', sql.NVarChar, JSON.stringify(receipt.tags || []))
-          .input('items', sql.NVarChar, JSON.stringify(receipt.items || []))
-          .input('createdAt', sql.NVarChar, receipt.createdAt)
-          .input('imageUrl', sql.NVarChar, receipt.imageUrl || '')
-          .input('box_2d', sql.NVarChar, JSON.stringify(receipt.box_2d || null))
-          .query(`
-            INSERT INTO Receipts (id, merchant, date, total, currency, category, tags, items, createdAt, imageUrl, box_2d)
-            VALUES (@id, @merchant, @date, @total, @currency, @category, @tags, @items, @createdAt, @imageUrl, @box_2d)
-          `);
-        return res.status(201).json({ ...receipt, id: newId });
+  app.post('/api/categories', async (req, res) => {
+    try {
+      const { category } = req.body as {
+        category: Partial<ReceiptCategory> & Pick<ReceiptCategory, 'name'>;
+      };
+      const normalizedName = category.name.trim();
+
+      if (!normalizedName) {
+        return res.status(400).json({ error: 'Category name is required.' });
       }
+      const savedCategory = await saveCategory(pool, { ...category, name: normalizedName });
+      return res.status(category.id ? 200 : 201).json(savedCategory);
     } catch (error) {
       console.error(error);
-      res.status(500).json({ error: "Failed to save receipt" });
+      res.status(500).json({ error: 'Failed to save category' });
     }
   });
 
-  app.delete("/api/receipts/:id", async (req, res) => {
+  app.delete('/api/categories/:id', async (req, res) => {
     try {
-      const { id } = req.params;
-      await pool.request().input('id', sql.NVarChar, id).query("DELETE FROM Receipts WHERE id = @id");
+      const id = Number(req.params.id);
+      const usageCount = await countReceiptsByCategory(pool, id);
+
+      if (usageCount > 0) {
+        return res.status(409).json({
+          error: 'This category is still assigned to receipts and cannot be deleted.',
+        });
+      }
+
+      await deleteCategory(pool, id);
       res.json({ success: true });
     } catch {
-      res.status(500).json({ error: "Failed to delete receipt" });
+      res.status(500).json({ error: 'Failed to delete category' });
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  app.get('/api/receipts', async (_req, res) => {
+    try {
+      res.json(await listReceipts(pool));
+    } catch {
+      res.status(500).json({ error: 'Failed to read receipts' });
+    }
+  });
+
+  app.post('/api/receipts', async (req, res) => {
+    try {
+      const { receipt } = req.body as { receipt: Receipt };
+      const savedReceipt = await saveReceipt(pool, receipt);
+      const isUpdate = receipt.id && !receipt.id.startsWith('temp-');
+      return res.status(isUpdate ? 200 : 201).json(savedReceipt);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to save receipt' });
+    }
+  });
+
+  app.delete('/api/receipts/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await deleteReceipt(pool, id);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to delete receipt' });
+    }
+  });
+
+  if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, "dist");
+    const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
 startServer().catch((error) => {
-  console.error("Failed to start server:", error);
+  console.error('Failed to start server:', error);
   process.exit(1);
 });
