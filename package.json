@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "npm --prefix server run dev",
     "build": "vite build && npm --prefix server run build",
-    "start": "npm --prefix server run start",
+    "start": "node server.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit && npm --prefix server run lint",
