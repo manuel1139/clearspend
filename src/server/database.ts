@@ -134,40 +134,48 @@ async function ensureSchema(pool: sql.ConnectionPool) {
 
     IF COL_LENGTH('dbo.Receipts', 'category') IS NOT NULL
     BEGIN
-      INSERT INTO Categories (name)
-      SELECT DISTINCT LTRIM(RTRIM(category))
-      FROM Receipts
-      WHERE category IS NOT NULL
-        AND LTRIM(RTRIM(category)) <> ''
-        AND NOT EXISTS (
-          SELECT 1
-          FROM Categories
-          WHERE Categories.name = LTRIM(RTRIM(Receipts.category))
-        )
+      EXEC sp_executesql N'
+        INSERT INTO Categories (name)
+        SELECT DISTINCT LTRIM(RTRIM(category))
+        FROM Receipts
+        WHERE category IS NOT NULL
+          AND LTRIM(RTRIM(category)) <> ''''
+          AND NOT EXISTS (
+            SELECT 1
+            FROM Categories
+            WHERE Categories.name = LTRIM(RTRIM(Receipts.category))
+          );
+      '
 
-      UPDATE Receipts
-      SET categoryId = Categories.id
-      FROM Receipts
-      INNER JOIN Categories
-        ON Categories.name = LTRIM(RTRIM(Receipts.category))
-      WHERE Receipts.categoryId IS NULL
+      EXEC sp_executesql N'
+        UPDATE Receipts
+        SET categoryId = Categories.id
+        FROM Receipts
+        INNER JOIN Categories
+          ON Categories.name = LTRIM(RTRIM(Receipts.category))
+        WHERE Receipts.categoryId IS NULL;
+      '
     END
 
-    UPDATE Receipts
-    SET categoryId = (
-      SELECT TOP 1 id
-      FROM Categories
-      WHERE name = 'Sonstiges'
-    )
-    WHERE categoryId IS NULL
+    EXEC sp_executesql N'
+      UPDATE Receipts
+      SET categoryId = (
+        SELECT TOP 1 id
+        FROM Categories
+        WHERE name = ''Sonstiges''
+      )
+      WHERE categoryId IS NULL;
+    '
 
-    UPDATE Receipts
-    SET paymentRuleId = (
-      SELECT TOP 1 id
-      FROM PaymentRules
-      WHERE frequency = 'one_time'
-    )
-    WHERE paymentRuleId IS NULL
+    EXEC sp_executesql N'
+      UPDATE Receipts
+      SET paymentRuleId = (
+        SELECT TOP 1 id
+        FROM PaymentRules
+        WHERE frequency = ''one_time''
+      )
+      WHERE paymentRuleId IS NULL;
+    '
 
     IF NOT EXISTS (
       SELECT 1
