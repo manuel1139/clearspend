@@ -1,4 +1,11 @@
-import { Landmark, PencilLine, Plus, Settings2, Trash2 } from 'lucide-react';
+import {
+  ChevronLeft,
+  Landmark,
+  PencilLine,
+  Plus,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
 import { useState } from 'react';
 import type { AccountOverview } from '../lib/mockAccounts';
 import type { Receipt, ReceiptCategory } from '../types';
@@ -124,7 +131,15 @@ export function ConfigPage({
     <div className="space-y-5">
       <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-5 text-white shadow-[0_24px_70px_rgba(130,37,90,0.24)]">
         <div className="flex flex-wrap items-center gap-2">
-          <div>
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back to dashboard"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-white/12 text-white shadow-[0_12px_28px_rgba(130,37,90,0.18)]"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="mr-2">
             <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
               Configuration
             </p>
@@ -141,12 +156,6 @@ export function ConfigPage({
                 {link.label}
               </button>
             ))}
-            <button
-              onClick={onBack}
-              className="rounded-full bg-white/12 px-4 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(130,37,90,0.18)]"
-            >
-              Back
-            </button>
           </div>
         </div>
       </div>
@@ -204,7 +213,7 @@ export function ConfigPage({
             </button>
           </div>
 
-          <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
+          <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm max-h-72 overflow-y-auto">
             {accounts.map((account) => {
               const isActive = account.id === activeAccountId;
               return (
@@ -375,7 +384,7 @@ export function ConfigPage({
               </div>
             </div>
 
-            <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
+            <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm max-h-72 overflow-y-auto">
               {receipts.map((receipt) => {
                 const isActive = receipt.id === displayedReceipt?.id;
                 return (
@@ -518,7 +527,7 @@ export function ConfigPage({
             </button>
           </div>
 
-          <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
+          <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm max-h-72 overflow-y-auto">
             {categories.map((category) => {
               const isActive = category.id === displayedCategory.id;
               return (

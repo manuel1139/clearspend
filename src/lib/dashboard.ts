@@ -21,6 +21,7 @@ export interface SpendHistoryPoint {
 }
 
 export type DateRangePreset =
+  | 'all'
   | 'current-month'
   | 'last-month'
   | 'last-year'
@@ -32,6 +33,25 @@ export interface DateRange {
   end: Date;
 }
 
+export function resolveReceiptDateRange(receipts: Receipt[]): DateRange {
+  if (receipts.length === 0) {
+    const today = new Date();
+    return {
+      start: startOfDay(today),
+      end: endOfDay(today),
+    };
+  }
+
+  const sortedReceiptDates = receipts
+    .map((receipt) => parseISO(receipt.date))
+    .sort((left, right) => left.getTime() - right.getTime());
+
+  return {
+    start: startOfDay(sortedReceiptDates[0]),
+    end: endOfDay(sortedReceiptDates[sortedReceiptDates.length - 1]),
+  };
+}
+
 export function resolveDateRange(
   preset: DateRangePreset,
   customStart?: string,
@@ -40,6 +60,11 @@ export function resolveDateRange(
   const now = new Date();
 
   switch (preset) {
+    case 'all':
+      return {
+        start: startOfDay(new Date(1970, 0, 1)),
+        end: endOfDay(now),
+      };
     case 'current-month':
       return {
         start: startOfDay(startOfMonth(now)),

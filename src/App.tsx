@@ -30,35 +30,35 @@ import {
   buildSpendHistory,
   filterReceiptsByDateRange,
   resolveDateRange,
+  resolveReceiptDateRange,
   type DateRangePreset,
 } from './lib/dashboard';
 import { MOCK_ACCOUNTS } from './lib/mockAccounts';
 import type { AccountOverview } from './lib/mockAccounts';
 
 const CATEGORY_STACK_FALLBACK = ['Alle', 'Einkaufen', 'Essen'];
-const HISTORY_RANGE_OPTIONS: { value: Exclude<DateRangePreset, 'custom'>; label: string }[] =
-  [
-    { value: 'current-month', label: 'Current month' },
-    { value: 'last-month', label: 'Last month' },
-    { value: 'last-year', label: 'Last year' },
-    { value: 'last-10-days', label: 'Last 10 days' },
-  ];
+const HISTORY_RANGE_OPTIONS: { value: DateRangePreset; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'current-month', label: 'Current month' },
+  { value: 'last-month', label: 'Last month' },
+  { value: 'last-year', label: 'Last year' },
+  { value: 'last-10-days', label: 'Last 10 days' },
+  { value: 'custom', label: 'Custom dates' },
+];
 
 function RangeSelect({
   value,
   onChange,
 }: {
-  value: Exclude<DateRangePreset, 'custom'>;
-  onChange: (value: Exclude<DateRangePreset, 'custom'>) => void;
+  value: DateRangePreset;
+  onChange: (value: DateRangePreset) => void;
 }) {
   return (
     <label className="relative">
       <span className="sr-only">Select history range</span>
       <select
         value={value}
-        onChange={(event) =>
-          onChange(event.target.value as Exclude<DateRangePreset, 'custom'>)
-        }
+        onChange={(event) => onChange(event.target.value as DateRangePreset)}
         className="appearance-none rounded-full bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-2 pr-9 text-xs font-semibold text-white outline-none shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
       >
         {HISTORY_RANGE_OPTIONS.map((option) => (
@@ -110,8 +110,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isImportHubOpen, setIsImportHubOpen] = useState(false);
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
-  const [historyRange, setHistoryRange] =
-    useState<Exclude<DateRangePreset, 'custom'>>('current-month');
+  const [historyRange, setHistoryRange] = useState<DateRangePreset>('current-month');
+  const [customRangeStart, setCustomRangeStart] = useState('');
+  const [customRangeEnd, setCustomRangeEnd] = useState('');
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(
     'Alle',
   );
@@ -140,8 +141,11 @@ export default function App() {
     onClearReview: receipts.clearReview,
   });
   const selectedRange = useMemo(
-    () => resolveDateRange(historyRange),
-    [historyRange],
+    () =>
+      historyRange === 'all'
+        ? resolveReceiptDateRange(receipts.receipts)
+        : resolveDateRange(historyRange, customRangeStart, customRangeEnd),
+    [customRangeEnd, customRangeStart, historyRange, receipts.receipts],
   );
   const receiptsInRange = useMemo(
     () => filterReceiptsByDateRange(receipts.receipts, selectedRange),
@@ -162,7 +166,7 @@ export default function App() {
       .map(([name]) => name);
     const remaining = fallbackNames.filter((name) => name !== 'Alle' && !prioritized.includes(name));
 
-    return ['Alle', ...prioritized, ...remaining].slice(0, 3);
+    return ['Alle', ...prioritized, ...remaining];
   }, [categories.categories, receiptsInRange]);
   const activeCategoryName = categoryStackItems.includes(selectedCategoryName ?? '')
     ? selectedCategoryName
@@ -284,8 +288,32 @@ export default function App() {
                         : 'Configuration'}
                   </h1>
                   {activeScreen === 'dashboard' && (
-                    <div className="mt-3 flex justify-start">
-                      <RangeSelect value={historyRange} onChange={setHistoryRange} />
+                    <div className="mt-3 space-y-3">
+                      <div className="flex justify-start">
+                        <RangeSelect value={historyRange} onChange={setHistoryRange} />
+                      </div>
+                      {historyRange === 'custom' && (
+                        <div className="flex flex-wrap gap-2">
+                          <label className="min-w-[8.75rem] flex-1">
+                            <span className="sr-only">Custom range start date</span>
+                            <input
+                              type="date"
+                              value={customRangeStart}
+                              onChange={(event) => setCustomRangeStart(event.target.value)}
+                              className="w-full rounded-full bg-white/14 px-4 py-2 text-xs font-medium text-slate-950 outline-none ring-1 ring-white/20 placeholder:text-slate-500"
+                            />
+                          </label>
+                          <label className="min-w-[8.75rem] flex-1">
+                            <span className="sr-only">Custom range end date</span>
+                            <input
+                              type="date"
+                              value={customRangeEnd}
+                              onChange={(event) => setCustomRangeEnd(event.target.value)}
+                              className="w-full rounded-full bg-white/14 px-4 py-2 text-xs font-medium text-slate-950 outline-none ring-1 ring-white/20 placeholder:text-slate-500"
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -327,11 +355,12 @@ export default function App() {
                       <Sparkles size={18} className="mt-1 text-[#FFD0E6]" />
                     </div>
 
-                    <div className="mt-3 flex w-full flex-col gap-3 rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
-                      {categoryStackItems.map((categoryName, index) => (
-                        <button
-                          type="button"
-                          key={categoryName}
+                <div className="mt-3 h-72 overflow-y-auto overscroll-contain rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+                  <div className="flex w-full flex-col gap-3">
+                  {categoryStackItems.map((categoryName, index) => (
+                    <button
+                      type="button"
+                      key={categoryName}
                           onClick={() => setSelectedCategoryName(categoryName)}
                           className={`rounded-[1.4rem] bg-linear-to-br ${
                             accounts[index % accounts.length]?.accent ??
@@ -346,25 +375,26 @@ export default function App() {
                         >
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-sm font-semibold text-white">{categoryName}</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="mt-4 rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
-                          {activeCategoryName ?? 'Kategorie'}
-                        </p>
-                        <p className="text-xs text-white/72">
-                          {activeCategoryReceipts.length} items
-                        </p>
                       </div>
+                    </button>
+                  ))}
+                  </div>
+                </div>
 
-                      <div className="mt-3 space-y-2">
-                        {activeCategoryReceipts.length === 0 ? (
-                          <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
-                            No receipt items for this category yet.
+                <div className="mt-4 rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                      {activeCategoryName ?? 'Kategorie'}
+                    </p>
+                    <p className="text-xs text-white/72">
+                      {activeCategoryReceipts.length} items
+                    </p>
+                  </div>
+
+                  <div className="mt-3 h-72 space-y-2 overflow-y-auto overscroll-contain touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+                    {activeCategoryReceipts.length === 0 ? (
+                      <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
+                        No receipt items for this category yet.
                           </div>
                         ) : (
                           activeCategoryReceipts.map((receipt) => (
