@@ -13,12 +13,15 @@ Azure should be able to deploy the current commit with the normal Node workflow:
 2. run `npm run build`
 3. run `npm start`
 
+Because this repository contains a `yarn.lock`, Azure/Oryx may choose Yarn automatically during deployment. That is fine as long as remote build is enabled and the build step runs.
+
 ## Required App Settings
 
 Set these in Azure App Service Configuration:
 
 - `AZURE_SQL_CONNECTION_STRING`
 - `NODE_ENV=production`
+- `SCM_DO_BUILD_DURING_DEPLOYMENT=true`
 
 Set this as well if AI receipt scanning/import is used:
 
@@ -70,3 +73,17 @@ If your deployment setup requires an explicit startup command, use:
 ```bash
 npm start
 ```
+
+## Azure Checks If The Site Loads `/src/main.tsx`
+
+If production requests `/src/main.tsx`, Azure is serving the source `index.html` instead of the built `dist/index.html`.
+
+Check these items:
+
+1. `SCM_DO_BUILD_DURING_DEPLOYMENT` is set to `true`
+2. deployment logs show the build step ran successfully
+3. startup command is `npm start`
+4. the deployed artifact contains:
+   - `dist/index.html`
+   - `dist/assets/...`
+   - `server/dist/server/index.js`
