@@ -6,7 +6,12 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   Cog,
+  FileImage,
+  Landmark,
+  PackageSearch,
+  SquarePen,
   Sparkles,
+  ScrollText,
 } from 'lucide-react';
 import { ErrorAlert } from './components/ErrorAlert';
 import { ImportSummaryBanner } from './components/ImportSummaryBanner';
@@ -30,7 +35,7 @@ import {
 import { MOCK_ACCOUNTS } from './lib/mockAccounts';
 import type { AccountOverview } from './lib/mockAccounts';
 
-const CATEGORY_STACK_FALLBACK = ['Einkaufen', 'Essen', 'Gesundheit'];
+const CATEGORY_STACK_FALLBACK = ['Alle', 'Einkaufen', 'Essen'];
 const HISTORY_RANGE_OPTIONS: { value: Exclude<DateRangePreset, 'custom'>; label: string }[] =
   [
     { value: 'current-month', label: 'Current month' },
@@ -54,7 +59,7 @@ function RangeSelect({
         onChange={(event) =>
           onChange(event.target.value as Exclude<DateRangePreset, 'custom'>)
         }
-        className="appearance-none rounded-full bg-white/12 px-4 py-2 pr-9 text-xs font-semibold text-white/82 outline-none backdrop-blur-sm"
+        className="appearance-none rounded-full bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-2 pr-9 text-xs font-semibold text-white outline-none shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
       >
         {HISTORY_RANGE_OPTIONS.map((option) => (
           <option key={option.value} value={option.value} className="text-slate-950">
@@ -62,10 +67,42 @@ function RangeSelect({
           </option>
         ))}
       </select>
-      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/72">
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#9B2C66]/80">
         ▾
       </span>
     </label>
+  );
+}
+
+function parseCurrencyValue(value: string) {
+  const normalized = value.replace(/[^0-9,.-]/g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function DataEntryTile({
+  icon,
+  title,
+  description,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-[1.7rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.06))] p-4 text-left text-white shadow-[0_16px_36px_rgba(114,29,83,0.24)] backdrop-blur-sm transition-transform hover:-translate-y-0.5"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="rounded-[1.2rem] bg-white/14 p-3 text-white">{icon}</div>
+      </div>
+      <p className="mt-4 text-base font-semibold">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-white/72">{description}</p>
+    </button>
   );
 }
 
@@ -74,13 +111,13 @@ export default function App() {
   const [isImportHubOpen, setIsImportHubOpen] = useState(false);
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
   const [historyRange, setHistoryRange] =
-    useState<Exclude<DateRangePreset, 'custom'>>('last-10-days');
+    useState<Exclude<DateRangePreset, 'custom'>>('current-month');
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(
-    CATEGORY_STACK_FALLBACK[0],
+    'Alle',
   );
-  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'config'>(
-    'dashboard',
-  );
+  const [activeScreen, setActiveScreen] = useState<
+    'dashboard' | 'intake' | 'config'
+  >('dashboard');
   const [accounts, setAccounts] = useState<AccountOverview[]>(MOCK_ACCOUNTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -102,29 +139,56 @@ export default function App() {
     onReviewReceipts: receipts.startReview,
     onClearReview: receipts.clearReview,
   });
-  const categoryStackItems =
-    categories.categories.length > 0
-      ? categories.categories.slice(0, 3).map((category) => category.name)
-      : CATEGORY_STACK_FALLBACK;
   const selectedRange = useMemo(
     () => resolveDateRange(historyRange),
     [historyRange],
   );
+  const receiptsInRange = useMemo(
+    () => filterReceiptsByDateRange(receipts.receipts, selectedRange),
+    [receipts.receipts, selectedRange],
+  );
+  const categoryStackItems = useMemo(() => {
+    const categoryNames = categories.categories.map((category) => category.name);
+    const fallbackNames =
+      categoryNames.length > 0 ? ['Alle', ...categoryNames] : CATEGORY_STACK_FALLBACK;
+    const counts = new Map<string, number>();
+
+    for (const receipt of receiptsInRange) {
+      counts.set(receipt.categoryName, (counts.get(receipt.categoryName) ?? 0) + 1);
+    }
+
+    const prioritized = [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .map(([name]) => name);
+    const remaining = fallbackNames.filter((name) => name !== 'Alle' && !prioritized.includes(name));
+
+    return ['Alle', ...prioritized, ...remaining].slice(0, 3);
+  }, [categories.categories, receiptsInRange]);
   const activeCategoryName = categoryStackItems.includes(selectedCategoryName ?? '')
     ? selectedCategoryName
     : (categoryStackItems[0] ?? null);
   const activeCategoryReceipts = useMemo(
     () =>
       activeCategoryName
-        ? filterReceiptsByDateRange(receipts.receipts, selectedRange).filter(
-            (receipt) => receipt.categoryName === activeCategoryName,
-          )
+        ? activeCategoryName === 'Alle'
+          ? receiptsInRange
+          : receiptsInRange.filter(
+              (receipt) => receipt.categoryName === activeCategoryName,
+            )
         : [],
-    [activeCategoryName, receipts.receipts, selectedRange],
+    [activeCategoryName, receiptsInRange],
   );
   const spendHistory = useMemo(
     () => buildSpendHistory(receipts.receipts, selectedRange),
     [receipts.receipts, selectedRange],
+  );
+  const currentBalanceTotal = useMemo(
+    () =>
+      accounts.reduce(
+        (sum, account) => sum + parseCurrencyValue(account.balance),
+        0,
+      ),
+    [accounts],
   );
 
   const handleReviewDelete = () => {
@@ -173,7 +237,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#ffe0ef_0%,#fff1f7_38%,#f7e9ff_100%)] px-3 py-4 text-slate-950 sm:px-6 sm:py-6">
+    <div className="min-h-screen bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-3 py-4 text-slate-950 sm:px-6 sm:py-6">
       <input
         type="file"
         ref={fileInputRef}
@@ -190,7 +254,7 @@ export default function App() {
       />
 
       <div
-        className={`mx-auto min-h-[calc(100vh-2rem)] max-w-107.5 overflow-hidden rounded-[2.4rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,241,247,0.96))] shadow-[0_35px_120px_rgba(124,40,92,0.16)] backdrop-blur-xl ${
+        className={`mx-auto min-h-[calc(100vh-2rem)] max-w-107.5 overflow-hidden rounded-[2.4rem] border border-white/12 bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.04))] shadow-[0_35px_120px_rgba(52,11,36,0.28)] backdrop-blur-xl ${
           imports.isDragging ? 'ring-4 ring-[#FF5FA2]/20' : ''
         }`}
         onDragOver={imports.handleDragOver}
@@ -205,7 +269,7 @@ export default function App() {
 
           <ErrorAlert error={error} onDismiss={() => setError(null)} />
 
-          {activeScreen === 'dashboard' ? (
+          {activeScreen !== 'config' ? (
             <div className="space-y-5">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
@@ -213,120 +277,192 @@ export default function App() {
                     ClearSpend Mobile
                   </p>
                   <h1 className="mt-2 text-[2rem] font-semibold tracking-tight text-slate-950">
-                    Dashboard
+                    {activeScreen === 'dashboard'
+                      ? 'Dashboard'
+                      : activeScreen === 'intake'
+                        ? 'Data Entry'
+                        : 'Configuration'}
                   </h1>
+                  {activeScreen === 'dashboard' && (
+                    <div className="mt-3 flex justify-start">
+                      <RangeSelect value={historyRange} onChange={setHistoryRange} />
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => setActiveScreen('config')}
-                  aria-label="Open configuration"
-                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#9B2C66] shadow-[0_12px_28px_rgba(155,44,102,0.14)]"
-                >
-                  <Cog size={18} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveScreen('intake')}
+                    aria-label="Open data entry"
+                    className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)] ${
+                      activeScreen === 'intake'
+                        ? 'bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)]'
+                        : 'bg-white/16'
+                    }`}
+                  >
+                    <SquarePen size={18} />
+                  </button>
+                  <button
+                    onClick={() => setActiveScreen('config')}
+                    aria-label="Open configuration"
+                    className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                  >
+                    <Cog size={18} />
+                  </button>
+                </div>
               </div>
 
-              <SpendHistoryChart
-                points={spendHistory}
-                rangeLabel={
-                  HISTORY_RANGE_OPTIONS.find((option) => option.value === historyRange)
-                    ?.label ?? 'Last 10 days'
-                }
-                headerAction={
-                  <RangeSelect value={historyRange} onChange={setHistoryRange} />
-                }
-              />
+              {activeScreen === 'dashboard' ? (
+                <>
+                  <SpendHistoryChart points={spendHistory} />
 
-              <div
-                className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-4 text-left text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
-                      Kategorien
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={18} className="text-[#FFD0E6]" />
-                    <RangeSelect value={historyRange} onChange={setHistoryRange} />
-                  </div>
-                </div>
-
-                <div className="mt-3 flex w-full flex-col gap-3 rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
-                  {categoryStackItems.map((categoryName, index) => (
-                    <button
-                      type="button"
-                      key={categoryName}
-                      onClick={() => setSelectedCategoryName(categoryName)}
-                      className={`rounded-[1.4rem] bg-linear-to-br ${
-                        accounts[index % accounts.length]?.accent ??
-                        'from-[#FF5FA2] via-[#FF78B5] to-[#FF9BCB]'
-                      } p-3 text-left shadow-[0_16px_36px_rgba(114,29,83,0.28)] transition-transform ${
-                        activeCategoryName === categoryName
-                          ? 'ring-2 ring-white/60'
-                          : ''
-                      } ${
-                        index > 0 ? '-mt-3' : ''
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-[0.24em] text-white/65">
-                            Receipt mapping
-                          </p>
-                          <p className="mt-1 text-base font-semibold">{categoryName}</p>
-                        </div>
-                        <p className="text-sm text-white/78">Kategorie</p>
+                  <div
+                    className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-4 text-left text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                          Kategorien
+                        </p>
                       </div>
-                    </button>
-                  ))}
-                </div>
+                      <Sparkles size={18} className="mt-1 text-[#FFD0E6]" />
+                    </div>
 
-                <div className="mt-4 rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
-                      {activeCategoryName ?? 'Kategorie'}
-                    </p>
-                    <p className="text-xs text-white/72">
-                      {activeCategoryReceipts.length} items
-                    </p>
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    {activeCategoryReceipts.length === 0 ? (
-                      <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
-                        No receipt items for this category yet.
-                      </div>
-                    ) : (
-                      activeCategoryReceipts.map((receipt) => (
+                    <div className="mt-3 flex w-full flex-col gap-3 rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm">
+                      {categoryStackItems.map((categoryName, index) => (
                         <button
-                          key={receipt.id}
                           type="button"
-                          onClick={() => receipts.setSelectedReceipt(receipt)}
-                          className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
+                          key={categoryName}
+                          onClick={() => setSelectedCategoryName(categoryName)}
+                          className={`rounded-[1.4rem] bg-linear-to-br ${
+                            accounts[index % accounts.length]?.accent ??
+                            'from-[#FF5FA2] via-[#FF78B5] to-[#FF9BCB]'
+                          } px-3 py-2.5 text-left shadow-[0_16px_36px_rgba(114,29,83,0.28)] transition-transform ${
+                            activeCategoryName === categoryName
+                              ? 'ring-2 ring-white/60'
+                              : ''
+                          } ${
+                            index > 0 ? 'mt-1.5' : ''
+                          }`}
                         >
-                          <div>
-                            <p className="text-sm font-medium text-white">
-                              {receipt.merchant}
-                            </p>
-                            <p className="mt-1 text-xs text-white/68">
-                              {new Date(receipt.date).toLocaleDateString()}
-                            </p>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-white">{categoryName}</p>
                           </div>
-                          <p className="text-sm font-medium text-white/82">
-                            {receipt.currency} {receipt.total.toFixed(2)}
-                          </p>
                         </button>
-                      ))
-                    )}
+                      ))}
+                    </div>
+
+                    <div className="mt-4 rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                          {activeCategoryName ?? 'Kategorie'}
+                        </p>
+                        <p className="text-xs text-white/72">
+                          {activeCategoryReceipts.length} items
+                        </p>
+                      </div>
+
+                      <div className="mt-3 space-y-2">
+                        {activeCategoryReceipts.length === 0 ? (
+                          <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
+                            No receipt items for this category yet.
+                          </div>
+                        ) : (
+                          activeCategoryReceipts.map((receipt) => (
+                            <button
+                              key={receipt.id}
+                              type="button"
+                              onClick={() => receipts.setSelectedReceipt(receipt)}
+                              className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
+                            >
+                              <div>
+                                <p className="text-sm font-medium text-white">
+                                  {receipt.merchant}
+                                </p>
+                                <p className="mt-1 text-xs text-white/68">
+                                  {new Date(receipt.date).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <p className="text-sm font-medium text-white/82">
+                                {receipt.currency} {receipt.total.toFixed(2)}
+                              </p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-[1.7rem] bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-3 text-white shadow-[0_16px_36px_rgba(114,29,83,0.24)]">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                        Current balance
+                      </p>
+                      <p className="mt-2 text-lg font-semibold">
+                        EUR {currentBalanceTotal.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="rounded-[1.7rem] bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-4 py-3 text-white shadow-[0_16px_36px_rgba(114,29,83,0.24)]">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                        Budget
+                      </p>
+                      <p className="mt-2 text-lg font-semibold">
+                        EUR {budget.monthlyBudget.toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : activeScreen === 'intake' ? (
+                <div className="space-y-4">
+                  <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-4 text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]">
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                      Data sources
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-white/72">
+                      Add new spending data from Amazon, receipt images, banking data, or manual entries.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <DataEntryTile
+                      icon={<FileImage size={20} />}
+                      title="Receipt image"
+                      description="Import a photo or screenshot and review the extracted receipt."
+                      onClick={() => fileInputRef.current?.click()}
+                    />
+                    <DataEntryTile
+                      icon={<PackageSearch size={20} />}
+                      title="Amazon CSV"
+                      description="Upload exported Amazon order history and group items by order."
+                      onClick={() => csvInputRef.current?.click()}
+                    />
+                    <DataEntryTile
+                      icon={<ScrollText size={20} />}
+                      title="Amazon text"
+                      description="Paste an order email or detail page to import Amazon items."
+                      onClick={() => imports.setIsPasting(true)}
+                    />
+                    <DataEntryTile
+                      icon={<Landmark size={20} />}
+                      title="Banking data"
+                      description="Use the prepared entry point for future bank transaction imports."
+                      onClick={handleBankDataClick}
+                    />
+                    <DataEntryTile
+                      icon={<SquarePen size={20} />}
+                      title="Manual entry"
+                      description="Create a new expense entry and edit the data yourself."
+                      onClick={receipts.handleManualEntry}
+                    />
                   </div>
                 </div>
-              </div>
+              ) : null}
             </div>
           ) : (
             <ConfigPage
               accounts={accounts}
               categories={categories.categories}
               monthlyBudget={budget.monthlyBudget}
+              receipts={receipts.receipts}
               onBack={() => setActiveScreen('dashboard')}
               onSaveBudget={(value) => void budget.updateBudget(value)}
               onSaveAccount={handleSaveAccount}
