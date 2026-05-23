@@ -44,6 +44,7 @@ export interface KontoEntry {
   currency: string;
   counterpartyName: string;
   reference: string;
+  counterpartyId?: string;
   endToEndId?: string;
   remittanceInfo?: string;
   sourceFileName?: string;

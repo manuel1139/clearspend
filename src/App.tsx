@@ -163,7 +163,7 @@ export default function App() {
     'Alle',
   );
   const [activeScreen, setActiveScreen] = useState<
-    'dashboard' | 'intake' | 'config'
+    'dashboard' | 'intake' | 'config' | 'konto'
   >('dashboard');
   const [accounts, setAccounts] = useState<AccountOverview[]>(MOCK_ACCOUNTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -427,7 +427,9 @@ export default function App() {
                       ? 'Dashboard'
                       : activeScreen === 'intake'
                         ? 'Data Entry'
-                        : 'Configuration'}
+                        : activeScreen === 'konto'
+                          ? 'Banking'
+                          : 'Configuration'}
                   </h1>
                   {activeScreen === 'dashboard' && (
                     <div className="mt-3 space-y-3">
@@ -460,7 +462,7 @@ export default function App() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {activeScreen === 'intake' ? (
+                  {activeScreen === 'intake' || activeScreen === 'konto' ? (
                     <button
                       onClick={() => setActiveScreen('dashboard')}
                       aria-label="Back to dashboard"
@@ -470,6 +472,13 @@ export default function App() {
                     </button>
                   ) : (
                     <>
+                      <button
+                        onClick={() => setActiveScreen('konto')}
+                        aria-label="Open banking entries"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                      >
+                        <Landmark size={18} />
+                      </button>
                       <button
                         onClick={() => setActiveScreen('intake')}
                         aria-label="Open data entry"
@@ -680,6 +689,54 @@ export default function App() {
                       description="Create a new expense entry and edit the data yourself."
                       onClick={receipts.handleManualEntry}
                     />
+                  </div>
+                </div>
+              ) : activeScreen === 'konto' ? (
+                <div className="space-y-4">
+                  <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-4 text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]">
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                      Account Transactions
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-white/72">
+                      Review all imported transactions from your bank statements and matching status.
+                    </p>
+                  </div>
+
+                  <div className="rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
+                    <div className="flex items-center justify-between gap-3 px-1 mb-3">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                        Entries
+                      </p>
+                      <p className="text-xs text-white/72">{kontoEntries.entries.length} entries</p>
+                    </div>
+                    <div className="space-y-2 max-h-[60vh] overflow-y-auto overscroll-contain [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+                      {kontoEntries.entries.length === 0 ? (
+                        <div className="rounded-[1.2rem] bg-white/10 px-3 py-8 text-center text-sm text-white/78">
+                          No banking entries found. Import a ZIP file in Data Entry.
+                        </div>
+                      ) : (
+                        kontoEntries.entries.map((entry) => (
+                          <div key={entry.id} className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-white truncate">{entry.counterpartyName}</p>
+                              {entry.counterpartyId && (
+                                <p className="mt-0.5 text-[10px] text-white/50 truncate">ID: {entry.counterpartyId}</p>
+                              )}
+                              <p className="mt-1 truncate text-xs text-white/78">{entry.reference || entry.remittanceInfo}</p>
+                              <p className="mt-1 text-xs text-white/68">{new Date(entry.bookingDate).toLocaleDateString()}</p>
+                              {entry.sourceFileName && (
+                                <p className="mt-1 text-[10px] italic text-white/40 truncate">
+                                  Source: {entry.sourceFileName}
+                                </p>
+                              )}
+                            </div>
+                            <p className="text-sm font-medium text-white/82 tabular-nums">
+                              {entry.currency} {entry.amount.toFixed(2)}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : null}

@@ -59,6 +59,7 @@ function mapKontoEntryRecord(record: unknown): KontoEntry {
     currency: String(r.currency),
     counterpartyName: String(r.counterpartyName),
     reference: String(r.reference),
+    counterpartyId: (r.counterpartyId as string) || undefined,
     endToEndId: (r.endToEndId as string) || undefined,
     remittanceInfo: (r.remittanceInfo as string) || undefined,
     sourceFileName: (r.sourceFileName as string) || undefined,
@@ -129,6 +130,7 @@ async function ensureSchema(pool: sql.ConnectionPool) {
         currency NVARCHAR(10),
         counterpartyName NVARCHAR(255),
         reference NVARCHAR(MAX),
+        counterpartyId NVARCHAR(255),
         endToEndId NVARCHAR(255),
         remittanceInfo NVARCHAR(MAX),
         sourceFileName NVARCHAR(255),
@@ -182,6 +184,11 @@ async function ensureSchema(pool: sql.ConnectionPool) {
     IF COL_LENGTH('dbo.Receipts', 'kontoReference') IS NULL
     BEGIN
       ALTER TABLE Receipts ADD kontoReference NVARCHAR(MAX) NULL
+    END
+
+    IF COL_LENGTH('dbo.KontoEntries', 'counterpartyId') IS NULL
+    BEGIN
+      ALTER TABLE KontoEntries ADD counterpartyId NVARCHAR(255) NULL
     END
 
     IF COL_LENGTH('dbo.Receipts', 'category') IS NOT NULL
@@ -338,6 +345,7 @@ export async function listKontoEntries(pool: sql.ConnectionPool) {
       currency,
       counterpartyName,
       reference,
+      counterpartyId,
       endToEndId,
       remittanceInfo,
       sourceFileName,
@@ -365,6 +373,7 @@ export async function saveKontoEntries(
       .input('currency', sql.NVarChar, entry.currency)
       .input('counterpartyName', sql.NVarChar, entry.counterpartyName)
       .input('reference', sql.NVarChar, entry.reference)
+      .input('counterpartyId', sql.NVarChar, entry.counterpartyId || '')
       .input('endToEndId', sql.NVarChar, entry.endToEndId || '')
       .input('remittanceInfo', sql.NVarChar, entry.remittanceInfo || '')
       .input('sourceFileName', sql.NVarChar, entry.sourceFileName || '')
@@ -379,6 +388,7 @@ export async function saveKontoEntries(
             currency = @currency,
             counterpartyName = @counterpartyName,
             reference = @reference,
+            counterpartyId = @counterpartyId,
             endToEndId = @endToEndId,
             remittanceInfo = @remittanceInfo,
             sourceFileName = @sourceFileName
@@ -394,6 +404,7 @@ export async function saveKontoEntries(
             currency,
             counterpartyName,
             reference,
+            counterpartyId,
             endToEndId,
             remittanceInfo,
             sourceFileName,
@@ -407,6 +418,7 @@ export async function saveKontoEntries(
             @currency,
             @counterpartyName,
             @reference,
+            @counterpartyId,
             @endToEndId,
             @remittanceInfo,
             @sourceFileName,
@@ -422,6 +434,7 @@ export async function saveKontoEntries(
           currency,
           counterpartyName,
           reference,
+          counterpartyId,
           endToEndId,
           remittanceInfo,
           sourceFileName,

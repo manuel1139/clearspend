@@ -20,6 +20,16 @@ interface CamtDate {
 
 interface CamtParty {
   Nm?: string;
+  Pty?: {
+    Nm?: string;
+    Id?: {
+      OrgId?: { AnyBIC?: string; Othr?: { Id?: string } };
+      PrvtId?: { Othr?: { Id?: string } };
+      Id?: string;
+      [key: string]: any;
+    };
+  };
+  Id?: any;
 }
 
 interface CamtRelatedParties {
@@ -123,7 +133,7 @@ function extractAmount(value: unknown) {
 
   if (value && typeof value === 'object') {
     const obj = value as Record<string, unknown>;
-    if (typeof obj['#text'] === 'string') {
+    if (typeof obj['#text'] === 'number') {
       return Number(obj['#text']);
     }
 
@@ -150,6 +160,33 @@ function safeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function extractPartyName(party: CamtParty | undefined): string {
+  if (!party) return '';
+  const directName = safeString(party.Nm) || safeString(party.Pty?.Nm);
+  if (directName) return directName;
+
+  // Fallback: search for any 'Nm' field in the party structure (handles variations in nesting like <Pty><Nm>)
+  const foundNames = findNodesByKey(party, 'Nm');
+  const firstValidName = foundNames.find((n) => typeof n === 'string' && n.trim()) as string | undefined;
+
+  return safeString(firstValidName);
+}
+
+function extractPartyId(party: CamtParty | undefined): string {
+  if (!party) return '';
+  const idObj = party.Id || party.Pty?.Id;
+  if (!idObj) return '';
+
+  if (typeof idObj === 'string') return idObj;
+
+  if (idObj.OrgId?.AnyBIC) return safeString(idObj.OrgId.AnyBIC);
+  if (idObj.OrgId?.Othr?.Id) return safeString(idObj.OrgId.Othr.Id);
+  if (idObj.PrvtId?.Othr?.Id) return safeString(idObj.PrvtId.Othr.Id);
+  if (idObj.Id) return safeString(idObj.Id);
+
+  return '';
+}
+
 function buildReference(parts: string[]) {
   return parts.map((part) => part.trim()).filter(Boolean).join(' | ');
 }
@@ -166,7 +203,7 @@ function stableHash(input: string) {
 
 function detectCamtFormat(xml: string) {
   const namespaceMatch = xml.match(
-    /urn:iso:std:iso:20022:tech:xsd:(camt\.\d{3}\.\d{3}\.\d{2})/i,
+    /urn:iso:std:iso:20022:tech:xsd:(camt\.\d{3})/i,
   );
 
   return namespaceMatch?.[1] ?? 'unknown';
@@ -239,10 +276,18 @@ function parseTransactionDetails(
       return [];
     }
 
-    const firstDetail = toArray(e.NtryDtls?.TxDtls)[0];
+    const entryRltdPties = (e as any).RltdPties || (e as any).NtryDtls?.RltdPties;
+
+    const cdtr = entryRltdPties?.Cdtr;
+    const dbtr = entryRltdPties?.Dbtr;
+    const ultmtCdtr = entryRltdPties?.UltmtCdtr;
+    const ultmtDbtr = entryRltdPties?.UltmtDbtr;
+
     const counterpartyName =
-      safeString(firstDetail?.RltdPties?.Cdtr?.Nm) ||
-      safeString(firstDetail?.RltdPties?.Dbtr?.Nm) ||
+      extractPartyName(cdtr) ||
+      extractPartyName(dbtr) ||
+      extractPartyName(ultmtCdtr) ||
+      extractPartyName(ultmtDbtr) ||
       'Konto';
     const reference = buildReference([
       safeString(e.AddtlNtryInf),
@@ -264,6 +309,12 @@ function parseTransactionDetails(
         amount: Math.abs(entryAmount),
         currency: entryCurrency,
         counterpartyName,
+        counterpartyId:
+          extractPartyId(cdtr) ||
+          extractPartyId(dbtr) ||
+          extractPartyId(ultmtCdtr) ||
+          extractPartyId(ultmtDbtr) ||
+          undefined,
         reference,
         createdAt: new Date().toISOString(),
         sourceFileName: fileName,
@@ -284,9 +335,17 @@ function parseTransactionDetails(
         return null;
       }
 
+      const entryRltdPties = (e as any).RltdPties || (e as any).NtryDtls?.RltdPties;
+      const cdtr = detail.RltdPties?.Cdtr || entryRltdPties?.Cdtr;
+      const dbtr = detail.RltdPties?.Dbtr || entryRltdPties?.Dbtr;
+      const ultmtCdtr = detail.RltdPties?.UltmtCdtr || entryRltdPties?.UltmtCdtr;
+      const ultmtDbtr = detail.RltdPties?.UltmtDbtr || entryRltdPties?.UltmtDbtr;
+
       const counterpartyName =
-        safeString(detail.RltdPties?.Cdtr?.Nm) ||
-        safeString(detail.RltdPties?.Dbtr?.Nm) ||
+        extractPartyName(cdtr) ||
+        extractPartyName(dbtr) ||
+        extractPartyName(ultmtCdtr) ||
+        extractPartyName(ultmtDbtr) ||
         safeString(detail.RltdAgts?.CdtrAgt?.FinInstnId?.Nm) ||
         'Konto';
       const remittanceLines = toArray(detail.RmtInf?.Ustrd).map(safeString);
@@ -317,6 +376,12 @@ function parseTransactionDetails(
         amount: Math.abs(amount),
         currency,
         counterpartyName,
+        counterpartyId:
+          extractPartyId(cdtr) ||
+          extractPartyId(dbtr) ||
+          extractPartyId(ultmtCdtr) ||
+          extractPartyId(ultmtDbtr) ||
+          undefined,
         reference,
         endToEndId: safeString(detail.Refs?.EndToEndId) || undefined,
         remittanceInfo: remittanceLines.join(' | ') || undefined,
@@ -349,7 +414,7 @@ export async function parseCamtZipBase64(
     const detectedFormat = detectCamtFormat(xml);
     detectedFormats.add(detectedFormat);
 
-    if (detectedFormat.startsWith('camt.053')) {
+    if (detectedFormat === 'camt.053') {
       const statements = await parseCamt053(xml);
       entries.push(...parseCamt053Statements(zipEntry.name, statements));
       continue;

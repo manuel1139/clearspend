@@ -1,14 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
-import { parseAmazonOrdersCsv } from '../lib/amazonImport';
-import {
-  importKontoZipRequest,
-  saveKontoEntriesRequest,
-} from '../lib/api/kontoEntries';
 import { saveReceiptRequest } from '../lib/api/receipts';
 import { isGeminiConfigured, checkGeminiStatus } from '../lib/gemini';
 import { parseOrderText, scanReceipt } from '../lib/gemini';
-import { matchKontoEntriesToReceipts } from '../lib/kontoImport';
 import {
   createReceiptFromParsedOrder,
   createReceiptFromScanResult,
@@ -309,35 +303,23 @@ export function useReceiptImportHandlers({
         throw new Error('No payment rules are configured.');
       }
 
-      updateImportStatus('amazon-csv', 'preparing', 'Parsing Amazon CSV locally.');
-      const { receipts: parsedReceipts, skippedCount: initialSkipped } = parseAmazonOrdersCsv(
-        text,
-        receipts,
-        categories,
-        defaultPaymentRule
-      );
-      
-      const savedReceipts: Receipt[] = [];
+      updateImportStatus('amazon-csv', 'saving', 'Processing Amazon CSV on server.');
+      const response = await fetch('/api/imports/amazon-csv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csvText: text }),
+      });
 
-      updateImportStatus('amazon-csv', 'saving', 'Saving imported Amazon CSV receipts.');
-      for (const receipt of parsedReceipts) {
-        try {
-          savedReceipts.push(await saveReceiptRequest(receipt));
-        } catch (error) {
-          console.error('Failed to save imported order:', error);
-        }
-      }
+      if (!response.ok) throw new Error('Server import failed');
+      const result = await response.json();
 
-      if (savedReceipts.length > 0 || initialSkipped > 0) {
-        onImportedReceipts(savedReceipts);
-        setImportSummary({
-          imported: savedReceipts.length,
-          skipped: initialSkipped,
-        });
+      if (result.savedReceipts.length > 0 || result.summary.skipped > 0) {
+        onImportedReceipts(result.savedReceipts);
+        setImportSummary(result.summary);
         updateImportStatus(
           'amazon-csv',
           'done',
-          `Imported ${savedReceipts.length} Amazon order(s), skipped ${initialSkipped} duplicates.`,
+          `Imported ${result.savedReceipts.length} Amazon order(s), skipped ${result.summary.skipped} duplicates.`,
         );
       } else {
         onError('Keine gültigen Bestelldaten in der CSV-Datei gefunden.');
@@ -370,47 +352,37 @@ export function useReceiptImportHandlers({
 
     try {
       const base64 = await readFileAsBase64(file);
-      const parsedKontoImport = await importKontoZipRequest(file.name, base64);
-      const parsedEntries = parsedKontoImport.entries;
-      const detectedFormatsLabel =
-        parsedKontoImport.detectedFormats.length > 0
-          ? parsedKontoImport.detectedFormats.join(', ')
-          : 'no CAMT format detected';
-      if (parsedEntries.length === 0) {
+      updateImportStatus('konto-zip', 'saving', 'Processing CAMT ZIP on server.');
+      
+      const response = await fetch('/api/imports/konto-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, base64 }),
+      });
+
+      if (!response.ok) throw new Error('Server Konto import failed');
+      const result = await response.json();
+
+      if (result.summary.imported === 0) {
         onError(
-          `Keine Konto-Buchungen in der ZIP-Datei gefunden. Format: ${detectedFormatsLabel}.`,
-        );
-        updateImportStatus(
-          'konto-zip',
-          'failed',
-          `No usable Konto entries found. Detected: ${detectedFormatsLabel}.`,
+          `Keine neuen Konto-Buchungen in der ZIP-Datei gefunden.`,
         );
         return;
       }
 
-      updateImportStatus('konto-zip', 'saving', 'Saving Konto entries and linking matching receipts.');
-      const savedEntries = await saveKontoEntriesRequest(parsedEntries);
-      const matchedReceipts = matchKontoEntriesToReceipts(savedEntries, receipts);
-      const savedMatchedReceipts: Receipt[] = [];
-
-      for (const receipt of matchedReceipts) {
-        savedMatchedReceipts.push(await saveReceiptRequest(receipt));
-      }
-
-      if (savedMatchedReceipts.length > 0) {
-        onMergeReceipts(savedMatchedReceipts);
+      if (result.savedReceipts.length > 0) {
+        onMergeReceipts(result.savedReceipts);
       }
 
       await onRefreshKontoEntries();
 
-      setImportSummary({
-        imported: savedEntries.length,
-        skipped: parsedEntries.length - savedEntries.length,
-      });
+      setImportSummary(result.summary);
+      const detectedFormatsLabel = result.detectedFormats?.join(', ') || 'unknown';
+      
       updateImportStatus(
         'konto-zip',
         'done',
-        `Detected ${detectedFormatsLabel}; imported ${savedEntries.length} Konto entries and linked ${savedMatchedReceipts.length} receipt(s).`,
+        `Detected ${detectedFormatsLabel}; imported ${result.summary.imported} entries and linked ${result.savedReceipts.length} receipt(s).`,
       );
     } catch (error) {
       updateImportStatus(

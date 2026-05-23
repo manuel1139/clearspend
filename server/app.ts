@@ -1,82 +1,21 @@
 import express from 'express';
 import path from 'path';
-import { GoogleGenerativeAI, SchemaType, Content, Schema } from '@google/generative-ai';
+import { GoogleGenerativeAI, Content } from '@google/generative-ai';
 import { createServer as createViteServer } from 'vite';
 import { createViteConfig } from '../shared/viteConfig.js';
-import { initializeDatabase } from './database.js';
+import { 
+  initializeDatabase, 
+  listReceiptCategories, 
+  listPaymentRules, 
+  listReceipts, 
+  saveReceipt, 
+  saveKontoEntries
+} from './database.js';
 import { findRepoRoot } from './paths.js';
 import { registerApiRoutes } from './routes/index.js';
-
-function buildReceiptListSchema(categoryNames: string[]): Schema {
-  const categoryProperty: Schema = (categoryNames.length
-    ? {
-        type: SchemaType.STRING,
-        enum: categoryNames,
-        description: 'Primaere Kategorie fuer die Ausgabe',
-      }
-    : {
-        type: SchemaType.STRING,
-        description: 'Primaere Kategorie fuer die Ausgabe',
-      }) as Schema;
-
-  return {
-    type: SchemaType.OBJECT,
-    properties: {
-      receipts: {
-        type: SchemaType.ARRAY,
-        items: {
-          type: SchemaType.OBJECT,
-          properties: {
-            merchant: { 
-              type: SchemaType.STRING, 
-              description: 'Name of the store or provider' 
-            },
-            date: { 
-              type: SchemaType.STRING, 
-              description: 'Receipt purchase date normalized as YYYY-MM-DD. Use an empty string only if no receipt date is visible.' 
-            },
-            total: { 
-              type: SchemaType.NUMBER, 
-              description: 'Total amount paid' 
-            },
-            currency: { 
-              type: SchemaType.STRING, 
-              description: 'Currency code (e.g. USD, EUR)' 
-            },
-            category: categoryProperty,
-            items: {
-              type: SchemaType.ARRAY,
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  name: { type: SchemaType.STRING },
-                  price: { type: SchemaType.NUMBER },
-                  quantity: { type: SchemaType.NUMBER },
-                  imageUrl: { 
-                    type: SchemaType.STRING, 
-                    description: 'URL to the item image if found in the source text' 
-                  },
-                },
-              },
-            },
-            tags: { 
-              type: SchemaType.ARRAY, 
-              items: { type: SchemaType.STRING },
-              description: 'Optional list of tags to persist with the receipt, such as source labels or order identifiers.'
-            },
-            box_2d: { 
-              type: SchemaType.ARRAY, 
-              items: { type: SchemaType.NUMBER },
-              description: 'Bounding box of the specific receipt in the format [ymin, xmin, ymax, xmax] normalized to 0-1000'
-            },
-          },
-          required: ['merchant', 'date', 'total', 'category'],
-        },
-      },
-    },
-    required: ['receipts'],
-  };
-}
+import { buildReceiptListSchema } from './geminiSchema.js';
+import { parseAmazonOrdersCsv } from './amazonImport.js';
+import { parseCamtZipBase64 } from './kontoImport.js';
 
 export async function createApp(connectionString: string) {
   const app = express();
@@ -162,6 +101,77 @@ export async function createApp(connectionString: string) {
     } catch (error: unknown) {
       console.error('Gemini error:', error);
       res.status(500).json({ error: 'Failed to process request' });
+    }
+  });
+
+  app.post('/api/imports/amazon-csv', async (req, res) => {
+    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    const { csvText } = req.body;
+
+    try {
+      const [categories, paymentRules, existingReceipts] = await Promise.all([
+        listReceiptCategories(pool),
+        listPaymentRules(pool),
+        listReceipts(pool)
+      ]);
+
+      const defaultRule = paymentRules.find(r => r.frequency === 'one_time') || paymentRules[0];
+      const { receipts, skippedCount } = parseAmazonOrdersCsv(csvText, existingReceipts, categories, defaultRule);
+
+      const savedReceipts = [];
+      for (const receipt of receipts) {
+        savedReceipts.push(await saveReceipt(pool, receipt));
+      }
+
+      res.json({ savedReceipts, summary: { imported: savedReceipts.length, skipped: skippedCount } });
+    } catch (error) {
+      console.error('Amazon CSV import error:', error);
+      res.status(500).json({ error: 'Failed to process CSV import' });
+    }
+  });
+
+  app.post('/api/imports/konto-zip', async (req, res) => {
+    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    const { fileName, base64 } = req.body;
+
+    try {
+      // 1. Parse ZIP and XML via the existing service
+      const { entries, detectedFormats } = await parseCamtZipBase64(fileName, base64);
+      
+      // 2. Persist the entries (Upsert logic)
+      const savedEntries = await saveKontoEntries(pool, entries);
+
+      // 3. Perform matching against existing receipts on the server
+      const existingReceipts = await listReceipts(pool);
+      const updatedReceipts = [];
+
+      for (const receipt of existingReceipts) {
+        if (receipt.kontoEntryId) continue;
+
+        // Matching heuristic: Exact amount and matching booking date
+        const match = savedEntries.find(e => 
+          Math.abs(e.amount - receipt.total) < 0.01 && 
+          e.bookingDate === receipt.date
+        );
+
+        if (match) {
+          const saved = await saveReceipt(pool, {
+            ...receipt,
+            kontoEntryId: match.id,
+            kontoReference: match.reference
+          });
+          if (saved) updatedReceipts.push(saved);
+        }
+      }
+
+      res.json({ 
+        savedReceipts: updatedReceipts, 
+        summary: { imported: savedEntries.length, skipped: entries.length - savedEntries.length },
+        detectedFormats 
+      });
+    } catch (error) {
+      console.error('Konto ZIP import error:', error);
+      res.status(500).json({ error: 'Failed to process Konto ZIP import' });
     }
   });
 
