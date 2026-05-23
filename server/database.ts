@@ -307,10 +307,11 @@ async function ensureSchema(pool: sql.ConnectionPool) {
 export async function initializeDatabase(connectionString: string) {
   if (process.env.NODE_ENV === 'production') {
     console.log('[Backend] Initializing in production mode');
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn('[Backend] WARNING: GEMINI_API_KEY is missing from environment variables.');
+    const key = process.env.GEMINI_API_KEY?.trim();
+    if (!key) {
+      console.warn('[Backend] WARNING: GEMINI_API_KEY is missing or empty in environment variables.');
     } else {
-      console.log('[Backend] GEMINI_API_KEY detected.');
+      console.log(`[Backend] GEMINI_API_KEY detected (length: ${key.length}).`);
     }
   }
 

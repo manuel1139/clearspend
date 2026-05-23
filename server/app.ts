@@ -24,10 +24,11 @@ export async function createApp(connectionString: string) {
 
   app.use(express.json({ limit: '50mb' }));
 
-  const ai = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const ai = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
   app.get('/api/gemini/status', (_req, res) => {
-    res.json({ configured: !!process.env.GEMINI_API_KEY });
+    res.json({ configured: !!apiKey });
   });
 
   app.post('/api/gemini/:action', async (req, res) => {

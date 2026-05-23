@@ -7,6 +7,7 @@ const envMode =
 
 const envFilePath = findEnvFile(envMode);
 if (envFilePath) {
+  console.info(`[Server] Loading environment from ${envFilePath}`);
   dotenv.config({ path: envFilePath });
 }
 
