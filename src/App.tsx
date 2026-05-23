@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Cog,
@@ -13,6 +13,9 @@ import {
   SquarePen,
   Sparkles,
   ScrollText,
+  Bug,
+  TrendingUp,
+  Repeat,
 } from 'lucide-react';
 import { ErrorAlert } from './components/ErrorAlert';
 import { ImportSummaryBanner } from './components/ImportSummaryBanner';
@@ -30,7 +33,6 @@ import { useReceiptImport } from './hooks/useReceiptImport';
 import { useReceipts } from './hooks/useReceipts';
 import {
   buildSpendHistory,
-  filterReceiptsByDateRange,
   resolveDateRange,
   resolveReceiptDateRange,
   type DateRangePreset,
@@ -39,7 +41,6 @@ import { MOCK_ACCOUNTS } from './lib/mockAccounts';
 import type { AccountOverview } from './lib/mockAccounts';
 import type { KontoEntry, Receipt } from './types';
 
-const CATEGORY_STACK_FALLBACK = ['Alle', 'Einkaufen', 'Essen'];
 const HISTORY_RANGE_OPTIONS: { value: DateRangePreset; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'current-year', label: 'This year' },
@@ -156,15 +157,29 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isImportHubOpen, setIsImportHubOpen] = useState(false);
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
+  const [isCategorizingAI, setIsCategorizingAI] = useState(false);
   const [historyRange, setHistoryRange] = useState<DateRangePreset>('current-month');
   const [customRangeStart, setCustomRangeStart] = useState('');
   const [customRangeEnd, setCustomRangeEnd] = useState('');
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
   const [draggedCategoryIndex, setDraggedCategoryIndex] = useState<number | null>(null);
+  const [geminiApiKey, setGeminiApiKey] = useState<string | null>(null);
+  const [detectedEnvKeys, setDetectedEnvKeys] = useState<string[]>([]);
 
   const [activeScreen, setActiveScreen] = useState<
-    'dashboard' | 'intake' | 'config' | 'konto'
+    'dashboard' | 'intake' | 'config' | 'konto' | 'debug' | 'forecast' | 'recurring'
   >('dashboard');
+
+  useEffect(() => {
+    fetch('/api/gemini/status')
+      .then((res) => res.json())
+      .then((data) => {
+        setGeminiApiKey(data.apiKey);
+        setDetectedEnvKeys(data.detectedKeys || []);
+      })
+      .catch(() => setGeminiApiKey(null));
+  }, []);
+
   const [accounts, setAccounts] = useState<AccountOverview[]>(MOCK_ACCOUNTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -197,114 +212,92 @@ export default function App() {
         : resolveDateRange(historyRange, customRangeStart, customRangeEnd),
     [customRangeEnd, customRangeStart, historyRange, receipts.receipts],
   );
-  const receiptsInRange = useMemo(
-    () => filterReceiptsByDateRange(receipts.receipts, selectedRange),
-    [receipts.receipts, selectedRange],
-  );
-  const unmatchedKontoEntriesInRange = useMemo(
+  const kontoEntriesInRange = useMemo(
     () =>
       kontoEntries.entries.filter(
         (entry) =>
-          !receipts.receipts.some((receipt) => receipt.kontoEntryId === entry.id) &&
           isDateWithinRange(entry.bookingDate, selectedRange.start, selectedRange.end),
       ),
-    [kontoEntries.entries, receipts.receipts, selectedRange.end, selectedRange.start],
+    [kontoEntries.entries, selectedRange],
+  );
+
+  const recurringReceipts = useMemo(
+    () => receipts.receipts.filter((r) => r.paymentRuleFrequency !== 'one_time'),
+    [receipts.receipts],
   );
 
   const categoryStackItems = useMemo(() => {
-    const names = categories.categories.map((c) => c.name);
-    return ['Alle', ...names];
+    return categories.categories.map((c) => c.name);
   }, [categories.categories]);
 
   const activeCategoryName = selectedCategoryName;
   const activeCategoryItems = useMemo<DashboardListItem[]>(
     () => {
-      const receiptItems = receiptsInRange.map((receipt) => ({
-        id: receipt.id,
-        merchant: receipt.merchant,
-        date: receipt.date,
-        total: receipt.total,
-        currency: receipt.currency,
-        categoryName: receipt.categoryName,
-        productLabel:
-          getReceiptProductNames(receipt)[0]
-            ? `${getReceiptProductNames(receipt)[0]}${
-                getReceiptProductNames(receipt).length > 1
-                  ? ` +${getReceiptProductNames(receipt).length - 1}`
-                  : ''
-              }`
-            : undefined,
-        receipt,
-      }));
-      const kontoItems = unmatchedKontoEntriesInRange.map((entry) => ({
-        id: entry.id,
-        merchant: entry.counterpartyName || 'Konto',
-        date: entry.bookingDate,
-        total: entry.amount,
-        currency: entry.currency,
-        categoryName: 'Sonstiges',
-        productLabel: entry.reference || entry.remittanceInfo,
-        kontoEntry: entry,
-      }));
+      const items = kontoEntriesInRange.map((entry): DashboardListItem => {
+        const linkedReceipt = receipts.receipts.find((r) => r.kontoEntryId === entry.id);
 
-      let items: DashboardListItem[];
-      if (!activeCategoryName) {
-        items = [];
-      } else if (activeCategoryName === 'Alle') {
-        items = [...receiptItems, ...kontoItems];
-      } else if (activeCategoryName === 'Sonstiges') {
-        items = [
-          ...receiptItems.filter((item) => item.categoryName === 'Sonstiges'),
-          ...kontoItems,
-        ];
-      } else {
-        items = receiptItems.filter((item) => item.categoryName === activeCategoryName);
-      }
+        return {
+          id: entry.id,
+          merchant: linkedReceipt?.merchant ?? entry.counterpartyName ?? 'Konto',
+          date: entry.bookingDate,
+          total: entry.amount,
+          currency: entry.currency,
+          categoryName: linkedReceipt?.categoryName ?? entry.categoryName ?? 'Sonstiges',
+          productLabel: linkedReceipt
+            ? getReceiptProductNames(linkedReceipt)[0]
+              ? `${getReceiptProductNames(linkedReceipt)[0]}${
+                  getReceiptProductNames(linkedReceipt).length > 1
+                    ? ` +${getReceiptProductNames(linkedReceipt).length - 1}`
+                    : ''
+                }`
+              : undefined
+            : entry.reference || entry.remittanceInfo,
+          receipt: linkedReceipt,
+          kontoEntry: entry,
+        };
+      });
 
-      return items.sort((left, right) => right.date.localeCompare(left.date));
+      const filtered = !activeCategoryName
+        ? []
+        : items.filter((item) => item.categoryName === activeCategoryName);
+
+      return filtered.sort((left, right) => right.date.localeCompare(left.date));
     },
-    [activeCategoryName, receiptsInRange, unmatchedKontoEntriesInRange],
+    [activeCategoryName, kontoEntriesInRange, receipts.receipts],
   );
   const categoryStackTotals = useMemo(() => {
     const totals = new Map<string, { amount: number; currency: string }>();
-    let allAmount = 0;
-    let allCurrency = 'EUR';
 
-    for (const receipt of receiptsInRange) {
-      const currency = receipt.currency || 'EUR';
-      const categoryTotal = totals.get(receipt.categoryName) ?? {
-        amount: 0,
-        currency,
-      };
+    for (const entry of kontoEntriesInRange) {
+      const linkedReceipt = receipts.receipts.find((r) => r.kontoEntryId === entry.id);
+      const catName = linkedReceipt?.categoryName ?? entry.categoryName ?? 'Sonstiges';
 
-      categoryTotal.amount += receipt.total;
-      categoryTotal.currency = categoryTotal.currency || currency;
-      totals.set(receipt.categoryName, categoryTotal);
-
-      allAmount += receipt.total;
-      allCurrency = allCurrency === 'EUR' ? currency : allCurrency;
-    }
-
-    for (const entry of unmatchedKontoEntriesInRange) {
-      const categoryTotal = totals.get('Sonstiges') ?? {
+      const categoryTotal = totals.get(catName) ?? {
         amount: 0,
         currency: entry.currency || 'EUR',
       };
 
       categoryTotal.amount += entry.amount;
-      totals.set('Sonstiges', categoryTotal);
-
-      allAmount += entry.amount;
-      allCurrency = allCurrency === 'EUR' ? entry.currency : allCurrency;
+      totals.set(catName, categoryTotal);
     }
 
-    totals.set('Alle', { amount: allAmount, currency: allCurrency });
-
     return totals;
-  }, [receiptsInRange, unmatchedKontoEntriesInRange]);
+  }, [kontoEntriesInRange, receipts.receipts]);
+
   const spendHistory = useMemo(
-    () => buildSpendHistory(receipts.receipts, selectedRange),
-    [receipts.receipts, selectedRange],
+    () =>
+      buildSpendHistory(
+        kontoEntriesInRange.map((e) => {
+          const r = receipts.receipts.find((rec) => rec.kontoEntryId === e.id);
+          return {
+            date: e.bookingDate,
+            total: e.amount,
+            categoryName: r?.categoryName ?? e.categoryName ?? 'Sonstiges',
+                };
+              }) as unknown as Receipt[],
+        selectedRange,
+      ),
+    [kontoEntriesInRange, receipts.receipts, selectedRange],
   );
   const currentBalanceTotal = useMemo(
     () =>
@@ -314,6 +307,22 @@ export default function App() {
       ),
     [accounts],
   );
+
+  const forecastTotal = useMemo(() => {
+    const daysInMonth = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth() + 1,
+      0,
+    ).getDate();
+    const currentDay = new Date().getDate();
+    const spentSoFar = Array.from(categoryStackTotals.values()).reduce(
+      (sum, val) => sum + val.amount,
+      0,
+    );
+
+    // Linear extrapolation
+    return (spentSoFar / Math.max(currentDay, 1)) * daysInMonth;
+  }, [categoryStackTotals]);
 
   const handleReviewDelete = () => {
     if (!receipts.selectedReceipt) return;
@@ -332,16 +341,16 @@ export default function App() {
       return;
     }
 
-    setAccounts((currentAccounts) => {
+    setAccounts((currentAccounts: AccountOverview[]) => {
       const existingIndex = currentAccounts.findIndex(
-        (account) => account.id === draftAccount.id,
+        (account: AccountOverview) => account.id === draftAccount.id,
       );
 
       if (existingIndex === -1) {
         return [...currentAccounts, draftAccount];
       }
 
-      return currentAccounts.map((account) =>
+      return currentAccounts.map((account: AccountOverview) =>
         account.id === draftAccount.id ? draftAccount : account,
       );
     });
@@ -355,16 +364,24 @@ export default function App() {
     );
   };
 
-  const handleCategoryDragStart = (index: number) => {
-    // Offset by 1 because 'Alle' is at index 0 and isn't draggable in the DB sense
-    if (index === 0) return;
-    setDraggedCategoryIndex(index - 1);
+  const handleCategoryDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedCategoryIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    // Required for drag and drop to work in many browsers
+    e.dataTransfer.setData('text/plain', categoryStackItems[index] || '');
   };
 
-  const handleCategoryDrop = async (index: number) => {
-    if (draggedCategoryIndex === null || index === 0) return;
-    const targetIndex = index - 1;
-    if (draggedCategoryIndex === targetIndex) return;
+  const handleCategoryDrop = async (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedCategoryIndex === null) {
+      setDraggedCategoryIndex(null);
+      return;
+    }
+    const targetIndex = index;
+    if (draggedCategoryIndex === targetIndex) {
+      setDraggedCategoryIndex(null);
+      return;
+    }
 
     const newCategories = [...categories.categories];
     const [moved] = newCategories.splice(draggedCategoryIndex, 1);
@@ -383,12 +400,52 @@ export default function App() {
       });
 
       if (response.ok) {
-        await categories.refreshCategories();
+        const refresh = (categories as unknown as { refreshCategories?: () => Promise<void> })
+          .refreshCategories;
+        if (typeof refresh === 'function') {
+          await refresh();
+        }
       }
-    } catch (err) {
+    } catch {
       setError('Failed to save new category order.');
     } finally {
       setDraggedCategoryIndex(null);
+    }
+  };
+
+  const handleUpdateEntryCategory = async (entryId: string, categoryId: number) => {
+    try {
+      const response = await fetch(`/api/konto/${entryId}/category`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoryId }),
+      });
+
+      if (response.ok) {
+        await kontoEntries.refreshEntries();
+      }
+    } catch {
+      setError('Failed to update transaction category.');
+    }
+  };
+
+  const handleCategorizeSonstigesAI = async () => {
+    if (isCategorizingAI) return;
+    setIsCategorizingAI(true);
+    try {
+      const response = await fetch('/api/konto/categorize-ai', {
+        method: 'POST',
+      });
+      if (response.ok) {
+        await kontoEntries.refreshEntries();
+      } else {
+        const data = await response.json();
+        setError(data.error || 'Failed to run AI categorization.');
+      }
+    } catch {
+      setError('An error occurred during AI categorization.');
+    } finally {
+      setIsCategorizingAI(false);
     }
   };
 
@@ -446,6 +503,12 @@ export default function App() {
                         ? 'Data Entry'
                         : activeScreen === 'konto'
                           ? 'Banking'
+                          : activeScreen === 'debug'
+                            ? 'Debug'
+                            : activeScreen === 'forecast'
+                              ? 'Forecast'
+                              : activeScreen === 'recurring'
+                                ? 'Recurring'
                           : 'Configuration'}
                   </h1>
                   {activeScreen === 'dashboard' && (
@@ -479,7 +542,13 @@ export default function App() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {activeScreen === 'intake' || activeScreen === 'konto' ? (
+                  {[
+                    'intake',
+                    'konto',
+                    'debug',
+                    'forecast',
+                    'recurring',
+                  ].includes(activeScreen) ? (
                     <button
                       onClick={() => setActiveScreen('dashboard')}
                       aria-label="Back to dashboard"
@@ -495,6 +564,27 @@ export default function App() {
                         className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
                       >
                         <Landmark size={18} />
+                      </button>
+                      <button
+                        onClick={() => setActiveScreen('recurring')}
+                        aria-label="Open recurring payments"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                      >
+                        <Repeat size={18} />
+                      </button>
+                      <button
+                        onClick={() => setActiveScreen('forecast')}
+                        aria-label="Open forecast"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                      >
+                        <TrendingUp size={18} />
+                      </button>
+                      <button
+                        onClick={() => setActiveScreen('debug')}
+                        aria-label="Open debug info"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                      >
+                        <Bug size={18} />
                       </button>
                       <button
                         onClick={() => setActiveScreen('intake')}
@@ -528,7 +618,15 @@ export default function App() {
                           Kategorien
                         </p>
                       </div>
-                      <Sparkles size={18} className="mt-1 text-[#FFD0E6]" />
+                      <button
+                        onClick={handleCategorizeSonstigesAI}
+                        disabled={isCategorizingAI || !imports.geminiConfigured}
+                        title="Categorize 'Sonstiges' items using AI"
+                        className="mt-0.5 flex items-center gap-1.5 rounded-full bg-white/12 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-white transition hover:bg-white/20 disabled:opacity-40"
+                      >
+                        <Sparkles size={12} className={isCategorizingAI ? 'animate-pulse text-white' : 'text-[#FFD0E6]'} />
+                        <span>{isCategorizingAI ? 'Categorizing...' : 'AI Fix Sonstige'}</span>
+                      </button>
                     </div>
 
                 <div className="mt-3 h-[32rem] overflow-y-auto overscroll-contain rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
@@ -536,12 +634,13 @@ export default function App() {
                   {categoryStackItems.map((categoryName, index) => (
                     <div
                       key={categoryName}
-                      draggable={index > 0}
-                      onDragStart={() => handleCategoryDragStart(index)}
+                      draggable
+                      onDragStart={(e) => handleCategoryDragStart(e, index)}
                       onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => handleCategoryDrop(index)}
+                      onDrop={(e) => handleCategoryDrop(e, index)}
+                      onDragEnd={() => setDraggedCategoryIndex(null)}
                       className={`flex flex-col gap-2 transition-opacity ${
-                        draggedCategoryIndex === index - 1 ? 'opacity-40' : 'opacity-100'
+                        draggedCategoryIndex === index ? 'opacity-40' : 'opacity-100'
                       }`}
                     >
                       <button
@@ -556,8 +655,6 @@ export default function App() {
                             activeCategoryName === categoryName
                               ? 'ring-2 ring-white/60'
                               : ''
-                          } ${
-                            index > 0 ? 'mt-1.5' : ''
                           }`}
                         >
                           <div className="flex items-center justify-between gap-3">
@@ -580,33 +677,50 @@ export default function App() {
                             </div>
                           ) : (
                             activeCategoryItems.map((item) => (
-                              <button
+                              <div
                                 key={item.id}
-                                type="button"
-                                onClick={() => {
-                                  if (item.receipt) {
-                                    receipts.setSelectedReceipt(item.receipt);
-                                  }
-                                }}
-                                className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
+                                className="group relative flex w-full flex-col gap-2 rounded-[1.2rem] bg-white/10 px-3 py-3 transition hover:bg-white/16"
                               >
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-medium text-white">
-                                    {item.merchant}
-                                  </p>
-                                  {item.productLabel && (
-                                    <p className="mt-1 truncate text-xs text-white/78">
-                                      {item.productLabel}
+                                <div className="flex items-center justify-between gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (item.receipt) {
+                                        receipts.setSelectedReceipt(item.receipt);
+                                      }
+                                    }}
+                                    className="min-w-0 flex-1 text-left"
+                                  >
+                                    <p className="text-sm font-medium text-white">
+                                      {item.merchant}
                                     </p>
-                                  )}
-                                  <p className="mt-1 text-xs text-white/68">
-                                    {new Date(item.date).toLocaleDateString()}
+                                    {item.productLabel && (
+                                      <p className="mt-1 truncate text-xs text-white/78">
+                                        {item.productLabel}
+                                      </p>
+                                    )}
+                                    <p className="mt-1 text-xs text-white/68">
+                                      {new Date(item.date).toLocaleDateString()}
+                                    </p>
+                                  </button>
+                                  <p className="text-sm font-medium text-white/82 shrink-0">
+                                    {item.currency} {item.total.toFixed(2)}
                                   </p>
                                 </div>
-                                <p className="text-sm font-medium text-white/82">
-                                  {item.currency} {item.total.toFixed(2)}
-                                </p>
-                              </button>
+                                {!item.receipt && (
+                                  <div className="mt-2 border-t border-white/10 pt-2">
+                                    <select
+                                      className="w-full bg-transparent text-[10px] text-white/60 outline-none"
+                                      value={categories.categories.find(c => c.name === item.categoryName)?.id || ''}
+                                      onChange={(e) => handleUpdateEntryCategory(item.id, Number(e.target.value))}
+                                    >
+                                      {categories.categories.map(cat => (
+                                        <option key={cat.id} value={cat.id} className="text-slate-900">{cat.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
                             ))
                           )}
                         </div>
@@ -722,11 +836,21 @@ export default function App() {
                   </div>
 
                   <div className="rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
-                    <div className="flex items-center justify-between gap-3 px-1 mb-3">
+                    <div className="flex items-center justify-between gap-3 px-1 mb-4">
                       <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
                         Entries
                       </p>
-                      <p className="text-xs text-white/72">{kontoEntries.entries.length} entries</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={handleCategorizeSonstigesAI}
+                          disabled={isCategorizingAI || !imports.geminiConfigured}
+                          className="flex items-center gap-1.5 rounded-full bg-white/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white transition hover:bg-white/20 disabled:opacity-40"
+                        >
+                          <Sparkles size={10} className={isCategorizingAI ? 'animate-pulse' : 'text-[#FFD0E6]'} />
+                          <span>AI Fix</span>
+                        </button>
+                        <p className="text-[10px] font-medium text-white/40">{kontoEntries.entries.length} items</p>
+                      </div>
                     </div>
                     <div className="space-y-2 max-h-[60vh] overflow-y-auto overscroll-contain [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
                       {kontoEntries.entries.length === 0 ? (
@@ -755,6 +879,113 @@ export default function App() {
                           </div>
                         ))
                       )}
+                    </div>
+                  </div>
+                </div>
+              ) : activeScreen === 'recurring' ? (
+                <div className="space-y-4">
+                  <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-4 text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]">
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                      Recurring Expenses
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-white/72">
+                      Review your subscriptions and recurring payments identified from your receipts.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {recurringReceipts.length === 0 ? (
+                      <div className="rounded-[1.7rem] bg-white/12 p-8 text-center text-sm text-white/60 backdrop-blur-sm">
+                        No recurring payments found yet.
+                      </div>
+                    ) : (
+                      recurringReceipts.map((receipt) => (
+                        <div
+                          key={receipt.id}
+                          className="flex items-center justify-between gap-3 rounded-[1.7rem] bg-white/12 p-4 text-white backdrop-blur-sm"
+                        >
+                          <div>
+                            <p className="text-sm font-semibold">{receipt.merchant}</p>
+                            <p className="mt-1 text-[10px] uppercase tracking-wider text-white/60">
+                              {receipt.paymentRuleFrequency} • {receipt.categoryName}
+                            </p>
+                          </div>
+                          <p className="text-sm font-bold">
+                            {receipt.currency} {receipt.total.toFixed(2)}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ) : activeScreen === 'forecast' ? (
+                <div className="space-y-4">
+                  <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-4 text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]">
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                      Spending Forecast
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-white/72">
+                      Linear projection of your current spending for the remainder of the month.
+                    </p>
+                  </div>
+
+                  <div className="rounded-[1.7rem] bg-white/12 p-6 text-white backdrop-blur-sm">
+                    <p className="text-[11px] uppercase tracking-widest text-white/60">
+                      Estimated Month End
+                    </p>
+                    <p className="mt-2 text-3xl font-bold">
+                      EUR {forecastTotal.toFixed(2)}
+                    </p>
+                    <div className="mt-6 space-y-2">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-white/60">Target Budget</span>
+                        <span>EUR {budget.monthlyBudget.toFixed(2)}</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className={`h-full transition-all ${
+                            forecastTotal > budget.monthlyBudget ? 'bg-red-400' : 'bg-green-400'
+                          }`}
+                          style={{
+                            width: `${Math.min(100, (forecastTotal / budget.monthlyBudget) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : activeScreen === 'debug' ? (
+                <div className="space-y-4">
+                  <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-4 text-white shadow-[0_22px_64px_rgba(130,37,90,0.28)]">
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-white/60">
+                      System Debug
+                    </p>
+                  </div>
+
+                  <div className="rounded-[1.7rem] bg-white/12 p-5 text-white backdrop-blur-sm">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">
+                      Statistics
+                    </h3>
+                    <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+                      <div className="rounded-2xl bg-white/5 p-3">
+                        <p className="text-white/50 text-[10px]">Bank Entries</p>
+                        <p className="text-lg font-semibold">{kontoEntries.entries.length}</p>
+                      </div>
+                      <div className="rounded-2xl bg-white/5 p-3">
+                        <p className="text-white/50 text-[10px]">Receipts</p>
+                        <p className="text-lg font-semibold">{receipts.receipts.length}</p>
+                      </div>
+                      <div className="col-span-2 rounded-2xl bg-white/5 p-3">
+                        <p className="text-white/50 text-[10px]">Gemini API Key</p>
+                        <p className={`mt-1 break-all font-mono text-[10px] ${geminiApiKey ? 'text-white/80' : 'text-red-400'}`}>
+                          {geminiApiKey || `Not found. Found keys: ${detectedEnvKeys.join(', ') || 'None'}`}
+                        </p>
+                        {!geminiApiKey && detectedEnvKeys.length > 0 && (
+                          <p className="mt-2 text-[9px] text-white/40 italic">
+                            Check if the key name in Azure Portal matches GEMINI_API_KEY exactly.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

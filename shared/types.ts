@@ -44,6 +44,9 @@ export interface KontoEntry {
   currency: string;
   counterpartyName: string;
   reference: string;
+  categoryId?: number;
+  categoryName?: string;
+  categoryType?: 'ai-generated' | 'manually' | 'by-filter';
   counterpartyId?: string;
   endToEndId?: string;
   remittanceInfo?: string;

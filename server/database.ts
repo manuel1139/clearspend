@@ -59,6 +59,9 @@ function mapKontoEntryRecord(record: unknown): KontoEntry {
     currency: String(r.currency),
     counterpartyName: String(r.counterpartyName),
     reference: String(r.reference),
+    categoryId: r.categoryId ? Number(r.categoryId) : undefined,
+    categoryName: (r.categoryName as string) || undefined,
+    categoryType: (r.categoryType as 'ai-generated' | 'manually' | 'by-filter') || undefined,
     counterpartyId: (r.counterpartyId as string) || undefined,
     endToEndId: (r.endToEndId as string) || undefined,
     remittanceInfo: (r.remittanceInfo as string) || undefined,
@@ -139,6 +142,28 @@ async function ensureSchema(pool: sql.ConnectionPool) {
       )
     END
 
+    IF OBJECT_ID('dbo.CategoryRules', 'U') IS NULL
+    BEGIN
+      CREATE TABLE CategoryRules (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        pattern NVARCHAR(255) NOT NULL,
+        ruleType NVARCHAR(50) DEFAULT 'text',
+        categoryId INT NOT NULL,
+        CONSTRAINT FK_Rules_Categories FOREIGN KEY (categoryId) REFERENCES Categories(id) ON DELETE CASCADE
+      )
+    END
+
+    IF COL_LENGTH('dbo.CategoryRules', 'ruleType') IS NULL
+    BEGIN
+      ALTER TABLE CategoryRules ADD ruleType NVARCHAR(50) DEFAULT 'text'
+    END
+
+    IF COL_LENGTH('dbo.KontoEntries', 'categoryId') IS NULL
+    BEGIN
+      ALTER TABLE KontoEntries ADD categoryId INT NULL;
+      ALTER TABLE KontoEntries ADD CONSTRAINT FK_KontoEntries_Categories FOREIGN KEY (categoryId) REFERENCES Categories(id);
+    END
+
     IF NOT EXISTS (
       SELECT 1
       FROM sys.indexes
@@ -185,6 +210,11 @@ async function ensureSchema(pool: sql.ConnectionPool) {
     IF COL_LENGTH('dbo.Receipts', 'kontoReference') IS NULL
     BEGIN
       ALTER TABLE Receipts ADD kontoReference NVARCHAR(MAX) NULL
+    END
+
+    IF COL_LENGTH('dbo.KontoEntries', 'categoryType') IS NULL
+    BEGIN
+      ALTER TABLE KontoEntries ADD categoryType NVARCHAR(50) NULL;
     END
 
     IF COL_LENGTH('dbo.Categories', 'displayOrder') IS NULL
@@ -360,13 +390,17 @@ export async function listKontoEntries(pool: sql.ConnectionPool) {
       amount,
       currency,
       counterpartyName,
+      KontoEntries.categoryId,
+      Categories.name AS categoryName,
+      categoryType,
       reference,
       counterpartyId,
       endToEndId,
       remittanceInfo,
       sourceFileName,
-      createdAt
+      KontoEntries.createdAt
     FROM KontoEntries
+    LEFT JOIN Categories ON Categories.id = KontoEntries.categoryId
     ORDER BY bookingDate DESC, createdAt DESC
   `);
 
@@ -379,7 +413,35 @@ export async function saveKontoEntries(
 ) {
   const savedEntries: KontoEntry[] = [];
 
+  // Load rules for auto-categorization
+  const rulesResult = await pool.request().query('SELECT pattern, ruleType, categoryId FROM CategoryRules');
+  const rules = rulesResult.recordset as { pattern: string; ruleType: string; categoryId: number }[];
+
   for (const entry of entries) {
+    // Default categorization logic via rules
+    let targetCategoryId = entry.categoryId;
+    let targetCategoryType = entry.categoryType;
+
+    if (!targetCategoryId) {
+      const rule = rules.find(r => {
+        if (r.ruleType === 'account') {
+          return entry.counterpartyId === r.pattern;
+        }
+        // Default: text matching
+        const matchStr = `${entry.counterpartyName} ${entry.reference} ${entry.remittanceInfo}`.toLowerCase();
+        return matchStr.includes(r.pattern.toLowerCase());
+      });
+
+      if (rule) {
+        targetCategoryId = rule.categoryId;
+        targetCategoryType = 'by-filter';
+      } else {
+        // Fallback to "Sonstiges"
+        const sonstiges = await pool.request().query("SELECT id FROM Categories WHERE name = 'Sonstiges'");
+        targetCategoryId = sonstiges.recordset[0]?.id;
+      }
+    }
+
     const result = await pool
       .request()
       .input('id', sql.NVarChar, entry.id)
@@ -393,6 +455,8 @@ export async function saveKontoEntries(
       .input('endToEndId', sql.NVarChar, entry.endToEndId || '')
       .input('remittanceInfo', sql.NVarChar, entry.remittanceInfo || '')
       .input('sourceFileName', sql.NVarChar, entry.sourceFileName || '')
+      .input('categoryId', sql.Int, targetCategoryId)
+      .input('categoryType', sql.NVarChar, targetCategoryType || null)
       .input('createdAt', sql.NVarChar, entry.createdAt).query(`
         IF EXISTS (SELECT 1 FROM KontoEntries WHERE id = @id)
         BEGIN
@@ -407,6 +471,8 @@ export async function saveKontoEntries(
             counterpartyId = @counterpartyId,
             endToEndId = @endToEndId,
             remittanceInfo = @remittanceInfo,
+            categoryId = CASE WHEN KontoEntries.categoryType = 'manually' THEN KontoEntries.categoryId ELSE COALESCE(KontoEntries.categoryId, @categoryId) END,
+            categoryType = CASE WHEN KontoEntries.categoryType = 'manually' THEN 'manually' ELSE COALESCE(KontoEntries.categoryType, @categoryType) END,
             sourceFileName = @sourceFileName
           WHERE id = @id
         END
@@ -424,6 +490,8 @@ export async function saveKontoEntries(
             endToEndId,
             remittanceInfo,
             sourceFileName,
+            categoryId,
+            categoryType,
             createdAt
           )
           VALUES (
@@ -438,6 +506,8 @@ export async function saveKontoEntries(
             @endToEndId,
             @remittanceInfo,
             @sourceFileName,
+            @categoryId,
+            @categoryType,
             @createdAt
           )
         END
@@ -450,12 +520,16 @@ export async function saveKontoEntries(
           currency,
           counterpartyName,
           reference,
+          KontoEntries.categoryId,
+          Categories.name AS categoryName,
+          categoryType,
           counterpartyId,
           endToEndId,
           remittanceInfo,
           sourceFileName,
-          createdAt
+          KontoEntries.createdAt
         FROM KontoEntries
+        LEFT JOIN Categories ON Categories.id = KontoEntries.categoryId
         WHERE id = @id
       `);
 
@@ -463,6 +537,17 @@ export async function saveKontoEntries(
   }
 
   return savedEntries;
+}
+
+export async function updateKontoEntryCategory(pool: sql.ConnectionPool, id: string, categoryId: number, type: string = 'manually') {
+  await pool
+    .request()
+    .input('id', sql.NVarChar, id)
+    .input('catId', sql.Int, categoryId)
+    .input('type', sql.NVarChar, type)
+    .query('UPDATE KontoEntries SET categoryId = @catId, categoryType = @type WHERE id = @id');
+    
+  return true;
 }
 
 export async function listPaymentRules(pool: sql.ConnectionPool) {

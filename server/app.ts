@@ -7,9 +7,11 @@ import {
   initializeDatabase, 
   listReceiptCategories, 
   listPaymentRules, 
+  listKontoEntries,
   listReceipts, 
   saveReceipt, 
-  saveKontoEntries
+  saveKontoEntries,
+  updateKontoEntryCategory
 } from './database.js';
 import { findRepoRoot } from './paths.js';
 import { registerApiRoutes } from './routes/index.js';
@@ -24,11 +26,16 @@ export async function createApp(connectionString: string) {
 
   app.use(express.json({ limit: '50mb' }));
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  // Check for the correct key and the specific typo mentioned in the environment
+  const apiKey = (process.env.GEMINI_API_KEY || process.env.GEMNIY_KEY)?.trim();
   const ai = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
   app.get('/api/gemini/status', (_req, res) => {
-    res.json({ configured: !!apiKey });
+    res.json({ 
+      configured: !!apiKey, 
+      apiKey: apiKey || null,
+      detectedKeys: Object.keys(process.env).filter(k => /gemini|gemniy/i.test(k))
+    });
   });
 
   app.post('/api/gemini/:action', async (req, res) => {
@@ -142,7 +149,47 @@ export async function createApp(connectionString: string) {
       // 2. Persist the entries (Upsert logic)
       const savedEntries = await saveKontoEntries(pool, entries);
 
-      // 3. Perform matching against existing receipts on the server
+      // 3. AI Categorization Fallback for anything not caught by filters
+      const uncategorized = savedEntries.filter(e => !e.categoryId);
+      if (ai && uncategorized.length > 0) {
+        const categories = await listReceiptCategories(pool);
+        const categoryNames = categories.map(c => c.name);
+        const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+        const prompt = `Kategorisiere diese Banktransaktionen in folgende Kategorien: ${categoryNames.join(', ')}.
+        Partner: {counterpartyName}, Referenz: {reference}.
+        Antworte NUR mit einem JSON-Objekt: { "results": [{ "id": "...", "category": "Kategoriename" }] }`;
+
+        try {
+          const aiPrompt = `${prompt}\n\nTransaktionen:\n${uncategorized.map(e => `ID: ${e.id}, Partner: ${e.counterpartyName}, Ref: ${e.reference}`).join('\n')}`;
+          const result = await model.generateContent(aiPrompt);
+          const responseText = result.response.text().replace(/```json|```/g, '').trim();
+          const { results } = JSON.parse(responseText) as { results: { id: string; category: string }[] };
+
+          for (const res of results) {
+            const matchedCat = categories.find(c => c.name === res.category);
+            if (matchedCat) {
+              await updateKontoEntryCategory(pool, res.id, matchedCat.id, 'ai-generated');
+            }
+          }
+          
+          // Refresh internal entries list to reflect AI changes for matching step
+          const refreshedEntries = await saveKontoEntries(pool, entries);
+          savedEntries.length = 0;
+          savedEntries.push(...refreshedEntries);
+        } catch (aiError) {
+          console.error('AI Auto-categorization failed:', aiError);
+          // Fallback to Sonstiges if AI fails completely
+          const sonstiges = categories.find(c => c.name === 'Sonstiges');
+          if (sonstiges) {
+            for (const entry of uncategorized) {
+              await updateKontoEntryCategory(pool, entry.id, sonstiges.id, 'by-filter');
+            }
+          }
+        }
+      }
+
+      // 4. Perform matching against existing receipts on the server
       const existingReceipts = await listReceipts(pool);
       const updatedReceipts = [];
 
@@ -173,6 +220,67 @@ export async function createApp(connectionString: string) {
     } catch (error) {
       console.error('Konto ZIP import error:', error);
       res.status(500).json({ error: 'Failed to process Konto ZIP import' });
+    }
+  });
+
+  app.patch('/api/konto/:id/category', async (req, res) => {
+    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    const { id } = req.params;
+    const { categoryId } = req.body;
+
+    try {
+      await updateKontoEntryCategory(pool, id, categoryId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to update entry category:', error);
+      res.status(500).json({ error: 'Failed to update category' });
+    }
+  });
+
+  app.post('/api/konto/categorize-ai', async (req, res) => {
+    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    if (!ai) return res.status(503).json({ error: 'Gemini is not configured' });
+
+    try {
+      const [allEntries, categories] = await Promise.all([
+        listKontoEntries(pool),
+        listReceiptCategories(pool)
+      ]);
+
+      const sonstigesCat = categories.find(c => c.name === 'Sonstiges');
+      if (!sonstigesCat) return res.status(500).json({ error: '"Sonstiges" category not found' });
+
+      const targetEntries = allEntries.filter(e => 
+        e.categoryId === sonstigesCat.id && e.categoryType !== 'manually'
+      );
+
+      if (targetEntries.length === 0) {
+        return res.json({ success: true, updatedCount: 0 });
+      }
+
+      const categoryNames = categories.map(c => c.name).filter(n => n !== 'Sonstiges');
+      const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+      const prompt = `Kategorisiere diese Banktransaktionen in folgende Kategorien: ${categoryNames.join(', ')}. Partner: {counterpartyName}, Referenz: {reference}. Antworte NUR mit einem JSON-Objekt: { "results": [{ "id": "...", "category": "Kategoriename" }] }
+      
+      Transaktionen:
+      ${targetEntries.map(e => `ID: ${e.id}, Partner: ${e.counterpartyName}, Ref: ${e.reference}`).join('\n')}`;
+
+      const aiResult = await model.generateContent(prompt);
+      const responseText = aiResult.response.text().replace(/```json|```/g, '').trim();
+      const { results } = JSON.parse(responseText) as { results: { id: string; category: string }[] };
+
+      for (const resItem of results) {
+        const matchedCat = categories.find(c => c.name === resItem.category);
+        if (matchedCat && matchedCat.id !== sonstigesCat.id) {
+          await updateKontoEntryCategory(pool, resItem.id, matchedCat.id, 'ai-generated');
+        }
+      }
+
+      res.json({ success: true, updatedCount: results.length });
+    } catch (error) {
+      console.error('AI manual categorization failed:', error);
+      res.status(500).json({ error: 'Failed to run AI categorization' });
     }
   });
 
