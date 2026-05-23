@@ -8,12 +8,81 @@ export interface ParsedKontoImportResult {
   detectedFormats: string[];
 }
 
+interface CamtAmount {
+  '#text'?: string | number;
+  '@_Ccy'?: string;
+}
+
+interface CamtDate {
+  Dt?: string;
+  DtTm?: string;
+}
+
+interface CamtParty {
+  Nm?: string;
+}
+
+interface CamtRelatedParties {
+  Cdtr?: CamtParty;
+  Dbtr?: CamtParty;
+  UltmtCdtr?: CamtParty;
+  UltmtDbtr?: CamtParty;
+  CdtrAcct?: { Id?: { IBAN?: string; Othr?: { Id?: string } } };
+  DbtrAcct?: { Id?: { IBAN?: string; Othr?: { Id?: string } } };
+}
+
+interface CamtAgent {
+  FinInstnId?: {
+    Nm?: string;
+    BIC?: string;
+  };
+}
+
+interface CamtRemittanceInformation {
+  Ustrd?: string | string[];
+  Strd?: {
+    CdtrRefInf?: {
+      Ref?: string;
+    };
+    AddtlRmtInf?: string | string[];
+  } | Array<{
+    CdtrRefInf?: { Ref?: string };
+    AddtlRmtInf?: string | string[];
+  }>;
+}
+
+interface CamtEntry {
+  Amt?: CamtAmount;
+  BookgDt?: CamtDate;
+  ValDt?: CamtDate;
+  CdtDbtInd?: string;
+  AddtlNtryInf?: string;
+  NtryRef?: string;
+  NtryDtls?: {
+    TxDtls?: CamtTransactionDetail | CamtTransactionDetail[];
+  };
+}
+
+interface CamtTransactionDetail {
+  Amt?: CamtAmount;
+  CdtDbtInd?: string;
+  RltdPties?: CamtRelatedParties;
+  RltdAgts?: {
+    CdtrAgt?: CamtAgent;
+    DbtrAgt?: CamtAgent;
+  };
+  RmtInf?: CamtRemittanceInformation;
+  Refs?: { EndToEndId?: string; TxId?: string };
+  AddtlTxInf?: string;
+  RltdDts?: { IntrBkSttlmDt?: CamtDate; AccptncDtTm?: string };
+}
+
 function toArray<T>(value: T | T[] | undefined | null): T[] {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
 }
 
-function findNodesByKey(input: unknown, key: string, results: any[] = []): any[] {
+function findNodesByKey(input: unknown, key: string, results: unknown[] = []): unknown[] {
   if (!input || typeof input !== 'object') {
     return results;
   }
@@ -43,7 +112,7 @@ function normalizeDate(value: unknown) {
   return value.slice(0, 10);
 }
 
-function extractAmount(value: any) {
+function extractAmount(value: unknown) {
   if (typeof value === 'number') {
     return value;
   }
@@ -53,21 +122,25 @@ function extractAmount(value: any) {
   }
 
   if (value && typeof value === 'object') {
-    if (typeof value['#text'] === 'string') {
-      return Number(value['#text']);
+    const obj = value as Record<string, unknown>;
+    if (typeof obj['#text'] === 'string') {
+      return Number(obj['#text']);
     }
 
-    if (typeof value['@_'] === 'string') {
-      return Number(value['@_']);
+    if (typeof obj['@_'] === 'string') {
+      return Number(obj['@_']);
     }
   }
 
   return 0;
 }
 
-function extractCurrency(value: any) {
-  if (value && typeof value === 'object' && typeof value['@_Ccy'] === 'string') {
-    return value['@_Ccy'];
+function extractCurrency(value: unknown) {
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj['@_Ccy'] === 'string') {
+      return obj['@_Ccy'];
+    }
   }
 
   return 'EUR';
@@ -144,30 +217,36 @@ function parseCamt053Statements(
 }
 
 function parseTransactionDetails(
-  entry: any,
+  entry: unknown,
   fileName: string,
 ): KontoEntry[] {
-  const txDetails = findNodesByKey(entry, 'TxDtls').flatMap((value) => toArray(value));
-  const entryAmount = extractAmount(entry.Amt);
-  const entryCurrency = extractCurrency(entry.Amt);
+  const e = entry as CamtEntry;
+  const amtNode = e.Amt;
+  const bookgDt = e.BookgDt;
+  const valDt = e.ValDt;
+
+  const txDetails = findNodesByKey(e, 'TxDtls').flatMap((value) => toArray(value));
+  const entryAmount = extractAmount(amtNode);
+  const entryCurrency = extractCurrency(amtNode);
   const entryBookingDate =
-    normalizeDate(entry.BookgDt?.Dt ?? entry.BookgDt?.DtTm) ||
-    normalizeDate(entry.ValDt?.Dt ?? entry.ValDt?.DtTm);
-  const entryValueDate = normalizeDate(entry.ValDt?.Dt ?? entry.ValDt?.DtTm);
+    normalizeDate(bookgDt?.Dt ?? bookgDt?.DtTm) ||
+    normalizeDate(valDt?.Dt ?? valDt?.DtTm);
+  const entryValueDate = normalizeDate(valDt?.Dt ?? valDt?.DtTm);
 
   if (txDetails.length === 0) {
-    const debitCreditIndicator = safeString(entry.CdtDbtInd).toUpperCase();
+    const debitCreditIndicator = safeString(e.CdtDbtInd).toUpperCase();
     if (debitCreditIndicator && debitCreditIndicator !== 'DBIT') {
       return [];
     }
 
+    const firstDetail = toArray(e.NtryDtls?.TxDtls)[0];
     const counterpartyName =
-      safeString(entry.NtryDtls?.TxDtls?.RltdPties?.Cdtr?.Nm) ||
-      safeString(entry.NtryDtls?.TxDtls?.RltdPties?.Dbtr?.Nm) ||
+      safeString(firstDetail?.RltdPties?.Cdtr?.Nm) ||
+      safeString(firstDetail?.RltdPties?.Dbtr?.Nm) ||
       'Konto';
     const reference = buildReference([
-      safeString(entry.AddtlNtryInf),
-      safeString(entry.NtryRef),
+      safeString(e.AddtlNtryInf),
+      safeString(e.NtryRef),
     ]);
     const rawId = [
       fileName,
@@ -193,11 +272,13 @@ function parseTransactionDetails(
   }
 
   return txDetails
-    .map((detail): KontoEntry | null => {
-      const amount = extractAmount(detail.Amt || entry.Amt);
-      const currency = extractCurrency(detail.Amt || entry.Amt);
+    .map((detailNode): KontoEntry | null => {
+      const detail = detailNode as CamtTransactionDetail;
+      const detailAmt = detail.Amt || e.Amt;
+      const amount = extractAmount(detailAmt);
+      const currency = extractCurrency(detailAmt);
       const debitCreditIndicator =
-        safeString(detail.CdtDbtInd || entry.CdtDbtInd).toUpperCase();
+        safeString(detail.CdtDbtInd || e.CdtDbtInd).toUpperCase();
 
       if (debitCreditIndicator && debitCreditIndicator !== 'DBIT') {
         return null;
@@ -209,14 +290,16 @@ function parseTransactionDetails(
         safeString(detail.RltdAgts?.CdtrAgt?.FinInstnId?.Nm) ||
         'Konto';
       const remittanceLines = toArray(detail.RmtInf?.Ustrd).map(safeString);
+      const structuredRefs = toArray(detail.RmtInf?.Strd).map((s) => safeString(s?.CdtrRefInf?.Ref));
       const reference = buildReference([
         safeString(detail.Refs?.EndToEndId),
         safeString(detail.Refs?.TxId),
         safeString(detail.AddtlTxInf),
+        ...structuredRefs,
         ...remittanceLines,
       ]);
       const bookingDate =
-        normalizeDate(detail.RltdDts?.IntrBkSttlmDt?.DtTm) ||
+        normalizeDate(detail.RltdDts?.IntrBkSttlmDt?.Dt || detail.RltdDts?.IntrBkSttlmDt?.DtTm) ||
         normalizeDate(detail.RltdDts?.AccptncDtTm) ||
         entryBookingDate;
       const rawId = [

@@ -1,19 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
-import { findRefundedAmazonOrderIds } from '../lib/amazonImport';
+import { parseAmazonOrdersCsv } from '../lib/amazonImport';
 import {
   importKontoZipRequest,
   saveKontoEntriesRequest,
 } from '../lib/api/kontoEntries';
 import { saveReceiptRequest } from '../lib/api/receipts';
-import { isGeminiConfigured } from '../lib/gemini';
-import { parseAmazonCsvText, parseOrderText, scanReceipt } from '../lib/gemini';
+import { isGeminiConfigured, checkGeminiStatus } from '../lib/gemini';
+import { parseOrderText, scanReceipt } from '../lib/gemini';
 import { matchKontoEntriesToReceipts } from '../lib/kontoImport';
 import {
   createReceiptFromParsedOrder,
   createReceiptFromScanResult,
 } from '../lib/receiptFactories';
-import type { ImportSummary, Receipt } from '../types';
+import type { ImportSummary, Receipt, ReceiptItem } from '../types';
 import type { UseReceiptImportOptions } from './receiptImportTypes';
 
 function readFileAsText(file: File) {
@@ -58,26 +58,26 @@ function getOrderTag(receipt: Receipt) {
   return receipt.tags.find((tag) => tag.startsWith('Order: ')) ?? null;
 }
 
-function hasMatchingOrderTag(receipt: Receipt, existingReceipts: Receipt[]) {
-  const orderTag = getOrderTag(receipt);
-  if (!orderTag) {
-    return false;
-  }
+function isDuplicateReceipt(candidate: Receipt, existing: Receipt[]): boolean {
+  const orderTag = getOrderTag(candidate);
+  if (orderTag && existing.some((r) => r.tags.includes(orderTag))) return true;
 
-  return existingReceipts.some((existingReceipt) =>
-    existingReceipt.tags.includes(orderTag),
+  // Fingerprint match: Merchant + Date + Total
+  return existing.some(
+    (r) =>
+      r.merchant.toLowerCase().trim() ===
+        candidate.merchant.toLowerCase().trim() &&
+      r.date === candidate.date &&
+      Math.abs(r.total - candidate.total) < 0.01,
   );
 }
 
-function dedupeAmazonReceiptItems(receipt: Receipt) {
+function dedupeAmazonReceiptItems(receipt: Receipt): Receipt {
   if (!receipt.items || receipt.items.length === 0) {
     return receipt;
   }
 
-  const itemMap = new Map<
-    string,
-    { name: string; price: number; quantity?: number; imageUrl?: string }
-  >();
+  const itemMap = new Map<string, ReceiptItem>();
 
   for (const item of receipt.items) {
     const normalizedName = item.name.trim();
@@ -89,11 +89,12 @@ function dedupeAmazonReceiptItems(receipt: Receipt) {
       itemMap.set(key, {
         ...item,
         name: normalizedName,
+        quantity: item.quantity || 1,
       });
       continue;
     }
 
-    existingItem.quantity = (existingItem.quantity ?? 1) + (item.quantity ?? 1);
+    existingItem.quantity = (existingItem.quantity || 1) + (item.quantity || 1);
   }
 
   return {
@@ -121,6 +122,15 @@ export function useReceiptImportHandlers({
   const [lastImportKind, setLastImportKind] = useState<ImportKind>(null);
   const [lastImportPhase, setLastImportPhase] = useState<ImportPhase>('idle');
   const [lastImportMessage, setLastImportMessage] = useState('No import started yet.');
+  const [geminiConfigured, setGeminiConfigured] = useState(isGeminiConfigured());
+
+  useEffect(() => {
+    const checkStatus = async () => {
+      const isOk = await checkGeminiStatus();
+      setGeminiConfigured(isOk);
+    };
+    void checkStatus();
+  }, []);
 
   const updateImportStatus = (
     kind: ImportKind,
@@ -155,24 +165,34 @@ export function useReceiptImportHandlers({
       );
       const savedReceipts: Receipt[] = [];
 
+      let skippedCount = 0;
       updateImportStatus('amazon-text', 'saving', 'Saving extracted Amazon text receipts.');
       for (let index = 0; index < results.length; index++) {
-        const saved = await saveReceiptRequest(
-          createReceiptFromParsedOrder(
-            results[index],
-            index,
-            categories,
-            defaultPaymentRule,
-          ),
+        const candidate = createReceiptFromParsedOrder(
+          results[index],
+          index,
+          categories,
+          defaultPaymentRule,
         );
+
+        if (isDuplicateReceipt(candidate, [...receipts, ...savedReceipts])) {
+          skippedCount++;
+          continue;
+        }
+
+        const saved = await saveReceiptRequest(candidate);
         savedReceipts.push(saved);
       }
 
-      if (savedReceipts.length > 0) {
+      if (savedReceipts.length > 0 || skippedCount > 0) {
         onImportedReceipts(savedReceipts);
-        setImportSummary({ imported: savedReceipts.length, skipped: 0 });
+        setImportSummary({ imported: savedReceipts.length, skipped: skippedCount });
         setPastedText('');
-        updateImportStatus('amazon-text', 'done', `Gemini returned ${savedReceipts.length} receipt(s).`);
+        updateImportStatus(
+          'amazon-text',
+          'done',
+          `Imported ${savedReceipts.length} receipt(s), skipped ${skippedCount} duplicates.`,
+        );
       } else {
         onError('Keine Bestelldaten im Text erkannt.');
         updateImportStatus('amazon-text', 'failed', 'Gemini returned no usable Amazon text receipts.');
@@ -224,13 +244,24 @@ export function useReceiptImportHandlers({
           imageUrl,
         ),
       );
+      const uniqueReceipts = newReceipts.filter(
+        (r) => !isDuplicateReceipt(r, receipts),
+      );
+      const skippedCount = newReceipts.length - uniqueReceipts.length;
 
-      if (newReceipts.length > 0) {
-        onReviewReceipts(newReceipts);
-        updateImportStatus('receipt-image', 'done', `Gemini found ${newReceipts.length} receipt(s) in the image.`);
+      if (uniqueReceipts.length > 0) {
+        onReviewReceipts(uniqueReceipts);
+        updateImportStatus(
+          'receipt-image',
+          'done',
+          `Gemini found ${newReceipts.length} receipt(s); ${uniqueReceipts.length} ready for review, ${skippedCount} duplicates skipped.`,
+        );
       } else {
-        onError('Keine Belege im Bild erkannt.');
-        updateImportStatus('receipt-image', 'failed', 'Gemini found no usable receipts in the image.');
+        const message = skippedCount > 0 
+          ? 'Alle erkannten Belege sind bereits im System vorhanden.' 
+          : 'Keine Belege im Bild erkannt.';
+        onError(message);
+        updateImportStatus('receipt-image', 'failed', 'No new receipts found in image.');
       }
     } catch (error) {
       console.error('Scan error:', error);
@@ -278,44 +309,18 @@ export function useReceiptImportHandlers({
         throw new Error('No payment rules are configured.');
       }
 
-      updateImportStatus('amazon-csv', 'calling-gemini', 'Calling Gemini for Amazon CSV extraction.');
-      const parsedOrders = await parseAmazonCsvText(
+      updateImportStatus('amazon-csv', 'preparing', 'Parsing Amazon CSV locally.');
+      const { receipts: parsedReceipts, skippedCount: initialSkipped } = parseAmazonOrdersCsv(
         text,
-        categories.map((category) => category.name),
+        receipts,
+        categories,
+        defaultPaymentRule
       );
-      const refundedOrderIds = findRefundedAmazonOrderIds(text);
-      const createdReceipts = parsedOrders.map((result, index) =>
-        createReceiptFromParsedOrder(
-          result,
-          index,
-          categories,
-          defaultPaymentRule,
-        ),
-      );
-      const refundedFilteredReceipts = createdReceipts.filter((receipt) => {
-        const orderTag = getOrderTag(receipt);
-        const orderId = orderTag?.replace('Order: ', '') ?? '';
-        return orderId ? !refundedOrderIds.has(orderId) : true;
-      });
-      const parsedReceipts = refundedFilteredReceipts.map(dedupeAmazonReceiptItems);
-      const seenOrderTags = new Set<string>();
-      const importableReceipts = parsedReceipts.filter((receipt) => {
-        const orderTag = getOrderTag(receipt);
-        if (!orderTag) {
-          return true;
-        }
-
-        if (hasMatchingOrderTag(receipt, receipts) || seenOrderTags.has(orderTag)) {
-          return false;
-        }
-
-        seenOrderTags.add(orderTag);
-        return true;
-      });
+      
       const savedReceipts: Receipt[] = [];
 
       updateImportStatus('amazon-csv', 'saving', 'Saving imported Amazon CSV receipts.');
-      for (const receipt of importableReceipts) {
+      for (const receipt of parsedReceipts) {
         try {
           savedReceipts.push(await saveReceiptRequest(receipt));
         } catch (error) {
@@ -323,22 +328,20 @@ export function useReceiptImportHandlers({
         }
       }
 
-      const skippedCount = createdReceipts.length - importableReceipts.length;
-
-      if (savedReceipts.length > 0 || skippedCount > 0) {
+      if (savedReceipts.length > 0 || initialSkipped > 0) {
         onImportedReceipts(savedReceipts);
         setImportSummary({
           imported: savedReceipts.length,
-          skipped: skippedCount,
+          skipped: initialSkipped,
         });
         updateImportStatus(
           'amazon-csv',
           'done',
-          `Gemini returned ${createdReceipts.length} order(s); imported ${savedReceipts.length}, skipped ${skippedCount}.`,
+          `Imported ${savedReceipts.length} Amazon order(s), skipped ${initialSkipped} duplicates.`,
         );
       } else {
         onError('Keine gültigen Bestelldaten in der CSV-Datei gefunden.');
-        updateImportStatus('amazon-csv', 'failed', 'Gemini returned no usable Amazon CSV orders.');
+        updateImportStatus('amazon-csv', 'failed', 'No usable Amazon CSV orders found.');
       }
     } catch (error) {
       updateImportStatus(
@@ -455,7 +458,7 @@ export function useReceiptImportHandlers({
     pastedText,
     setPastedText,
     isDragging,
-    geminiConfigured: isGeminiConfigured(),
+    geminiConfigured,
     lastImportKind,
     lastImportPhase,
     lastImportMessage,

@@ -26,41 +26,43 @@ const DEFAULT_PAYMENT_RULES: Array<
   { name: 'Yearly', frequency: 'yearly' },
 ];
 
-function mapReceiptRecord(record: any): Receipt {
+function mapReceiptRecord(record: unknown): Receipt {
+  const r = record as Record<string, unknown>;
   return {
-    id: record.id,
-    merchant: record.merchant,
-    date: record.date,
-    total: record.total,
-    currency: record.currency,
-    categoryId: record.categoryId,
-    categoryName: record.categoryName,
-    paymentRuleId: record.paymentRuleId,
-    paymentRuleName: record.paymentRuleName,
-    paymentRuleFrequency: record.paymentRuleFrequency,
-    tags: JSON.parse(record.tags || '[]'),
-    items: JSON.parse(record.items || '[]'),
-    createdAt: record.createdAt,
-    imageUrl: record.imageUrl || undefined,
-    box_2d: JSON.parse(record.box_2d || 'null') ?? undefined,
-    kontoEntryId: record.kontoEntryId || undefined,
-    kontoReference: record.kontoReference || undefined,
+    id: String(r.id),
+    merchant: String(r.merchant),
+    date: String(r.date),
+    total: Number(r.total),
+    currency: String(r.currency),
+    categoryId: Number(r.categoryId),
+    categoryName: String(r.categoryName),
+    paymentRuleId: Number(r.paymentRuleId),
+    paymentRuleName: String(r.paymentRuleName),
+    paymentRuleFrequency: r.paymentRuleFrequency as Receipt['paymentRuleFrequency'],
+    tags: JSON.parse(String(r.tags || '[]')),
+    items: JSON.parse(String(r.items || '[]')),
+    createdAt: String(r.createdAt),
+    imageUrl: (r.imageUrl as string) || undefined,
+    box_2d: JSON.parse(String(r.box_2d || 'null')) ?? undefined,
+    kontoEntryId: (r.kontoEntryId as string) || undefined,
+    kontoReference: (r.kontoReference as string) || undefined,
   };
 }
 
-function mapKontoEntryRecord(record: any): KontoEntry {
+function mapKontoEntryRecord(record: unknown): KontoEntry {
+  const r = record as Record<string, unknown>;
   return {
-    id: record.id,
-    bookingDate: record.bookingDate,
-    valueDate: record.valueDate || undefined,
-    amount: record.amount,
-    currency: record.currency,
-    counterpartyName: record.counterpartyName,
-    reference: record.reference,
-    endToEndId: record.endToEndId || undefined,
-    remittanceInfo: record.remittanceInfo || undefined,
-    sourceFileName: record.sourceFileName || undefined,
-    createdAt: record.createdAt,
+    id: String(r.id),
+    bookingDate: String(r.bookingDate),
+    valueDate: (r.valueDate as string) || undefined,
+    amount: Number(r.amount),
+    currency: String(r.currency),
+    counterpartyName: String(r.counterpartyName),
+    reference: String(r.reference),
+    endToEndId: (r.endToEndId as string) || undefined,
+    remittanceInfo: (r.remittanceInfo as string) || undefined,
+    sourceFileName: (r.sourceFileName as string) || undefined,
+    createdAt: String(r.createdAt),
   };
 }
 

@@ -2,6 +2,21 @@ import type { PaymentRule, Receipt, ReceiptCategory } from '../types';
 import { normalizeReceiptDate } from './receiptDates';
 import { resolveReceiptCategory } from './receiptCategories';
 
+export interface AmazonCsvRow {
+  'order id': string;
+  'order date': string;
+  'website': string;
+  'total amount': string;
+  'currency': string;
+  'product name': string;
+  'order status': string;
+  'item total': string;
+  'refund': string;
+  'shipping_refund': string;
+  'items': string;
+  'payments': string;
+}
+
 function parseCurrencyAmount(value: string) {
   return parseFloat(value.replace(/,/g, '').replace(/[^0-9.-]+/g, '')) || 0;
 }
@@ -90,20 +105,25 @@ export function parseAmazonOrdersCsv(
     return { receipts: [], skippedCount: 0 };
   }
 
+  const refundedOrderIds = findRefundedAmazonOrderIds(text);
+  const headers = splitCsvLine(lines[0]);
+  
+  // Map header names to their column indices for robust access
+  const indices = {
+    date: parseHeaderIndex(headers, 'order date'),
+    merchant: parseHeaderIndex(headers, 'website'),
+    total: parseHeaderIndex(headers, 'total amount'),
+    currency: parseHeaderIndex(headers, 'currency'),
+    title: parseHeaderIndex(headers, 'product name'),
+    status: parseHeaderIndex(headers, 'order status'),
+    orderId: parseHeaderIndex(headers, 'order id'),
+    itemTotal: parseHeaderIndex(headers, 'item total'),
+  };
+
   const defaultCategory = resolveReceiptCategory(categories, 'Einkaufen');
   if (!defaultCategory) {
     throw new Error('No receipt categories are configured.');
   }
-
-  const headers = splitCsvLine(lines[0]);
-  const dateIdx = parseHeaderIndex(headers, 'order date');
-  const merchantIdx = parseHeaderIndex(headers, 'website');
-  const totalIdx = parseHeaderIndex(headers, 'total amount');
-  const currencyIdx = parseHeaderIndex(headers, 'currency');
-  const titleIdx = parseHeaderIndex(headers, 'product name');
-  const statusIdx = parseHeaderIndex(headers, 'order status');
-  const orderIdIdx = parseHeaderIndex(headers, 'order id');
-  const itemTotalIdx = parseHeaderIndex(headers, 'item total');
 
   const ordersMap = new Map<string, Receipt>();
   let skippedCount = 0;
@@ -113,9 +133,14 @@ export function parseAmazonOrdersCsv(
     if (!line) continue;
 
     const row = splitCsvLine(line);
-    if (statusIdx !== -1 && row[statusIdx] === 'Cancelled') continue;
+    const orderId = indices.orderId !== -1 ? row[indices.orderId] : `line-${index}`;
+    const status = indices.status !== -1 ? row[indices.status] : '';
 
-    const orderId = orderIdIdx !== -1 ? row[orderIdIdx] : `line-${index}`;
+    // Skip cancelled or refunded orders
+    if (status === 'Cancelled' || refundedOrderIds.has(orderId)) {
+      continue;
+    }
+
     if (
       orderId &&
       existingReceipts.some((receipt) => receipt.tags.includes(`Order: ${orderId}`))
@@ -124,22 +149,27 @@ export function parseAmazonOrdersCsv(
       continue;
     }
 
-    const title = titleIdx !== -1 ? row[titleIdx] : '';
-    const itemTotalStr = itemTotalIdx !== -1 ? row[itemTotalIdx] : '0';
+    const title = indices.title !== -1 ? row[indices.title] : '';
+    const itemTotalStr = indices.itemTotal !== -1 ? row[indices.itemTotal] : '0';
     const itemTotal = parseCurrencyAmount(itemTotalStr);
 
     if (ordersMap.has(orderId)) {
       const existing = ordersMap.get(orderId)!;
       if (title) {
-        existing.items?.push({ name: title, price: itemTotal, quantity: 1 });
+        const existingItem = existing.items.find(i => i.name === title && i.price === itemTotal);
+        if (existingItem) {
+          existingItem.quantity += 1;
+        } else {
+          existing.items.push({ name: title, price: itemTotal, quantity: 1 });
+        }
       }
       continue;
     }
 
-    const dateStr = dateIdx !== -1 ? row[dateIdx] : '';
-    const merchant = merchantIdx !== -1 ? row[merchantIdx] || 'Amazon.de' : 'Amazon';
-    const totalStr = totalIdx !== -1 ? row[totalIdx] : '0';
-    const currency = currencyIdx !== -1 ? row[currencyIdx] : 'EUR';
+    const dateStr = indices.date !== -1 ? row[indices.date] : '';
+    const merchant = indices.merchant !== -1 ? row[indices.merchant] || 'Amazon.de' : 'Amazon';
+    const totalStr = indices.total !== -1 ? row[indices.total] : '0';
+    const currency = indices.currency !== -1 ? row[indices.currency] : 'EUR';
     const total = parseCurrencyAmount(totalStr);
 
     if (isNaN(total) || total === 0) continue;

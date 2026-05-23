@@ -1,10 +1,3 @@
-export interface ReceiptItem {
-  name: string;
-  price: number;
-  quantity?: number;
-  imageUrl?: string;
-}
-
 export interface ReceiptCategory {
   id: number;
   name: string;
@@ -13,7 +6,14 @@ export interface ReceiptCategory {
 export interface PaymentRule {
   id: number;
   name: string;
-  frequency: 'monthly' | 'yearly' | 'one_time';
+  frequency: 'one_time' | 'monthly' | 'yearly';
+}
+
+export interface ReceiptItem {
+  name: string;
+  price: number;
+  quantity: number;
+  imageUrl?: string;
 }
 
 export interface Receipt {
@@ -26,30 +26,14 @@ export interface Receipt {
   categoryName: string;
   paymentRuleId: number;
   paymentRuleName: string;
-  paymentRuleFrequency: PaymentRule['frequency'];
+  paymentRuleFrequency: 'one_time' | 'monthly' | 'yearly';
   tags: string[];
-  items?: ReceiptItem[];
+  items: ReceiptItem[];
   createdAt: string;
   imageUrl?: string;
-  box_2d?: [number, number, number, number];
+  box_2d?: number[];
   kontoEntryId?: string;
   kontoReference?: string;
-}
-
-export interface ScannedReceipt {
-  merchant: string;
-  total: number;
-  category: string;
-  date?: string;
-  currency?: string;
-  items?: ReceiptItem[];
-  tags?: string[];
-  box_2d?: [number, number, number, number];
-}
-
-export interface ImportSummary {
-  imported: number;
-  skipped: number;
 }
 
 export interface KontoEntry {
@@ -64,4 +48,20 @@ export interface KontoEntry {
   remittanceInfo?: string;
   sourceFileName?: string;
   createdAt: string;
+}
+
+export interface ScannedReceipt {
+  merchant: string;
+  date: string;
+  total: number;
+  currency?: string;
+  category: string;
+  items?: ReceiptItem[];
+  tags?: string[];
+  box_2d?: number[];
+}
+
+export interface ImportSummary {
+  imported: number;
+  skipped: number;
 }
