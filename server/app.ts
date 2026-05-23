@@ -19,6 +19,8 @@ import { buildReceiptListSchema } from './geminiSchema.js';
 import { parseAmazonOrdersCsv } from './amazonImport.js';
 import { parseCamtZipBase64 } from './kontoImport.js';
 
+let lastAiResult: { prompt: string; response: string; timestamp: string } | null = null;
+
 export async function createApp(connectionString: string) {
   const app = express();
   const pool = await initializeDatabase(connectionString);
@@ -34,7 +36,8 @@ export async function createApp(connectionString: string) {
     res.json({ 
       configured: !!apiKey, 
       apiKey: apiKey || null,
-      detectedKeys: Object.keys(process.env).filter(k => /gemini|gemniy/i.test(k))
+      detectedKeys: Object.keys(process.env).filter(k => /gemini|gemniy/i.test(k)),
+      lastAiResult
     });
   });
 
@@ -50,6 +53,7 @@ export async function createApp(connectionString: string) {
     const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     let contents: Content[];
+    let promptText = '';
 
     if (action === 'scan') {
       if (!base64Image || !mimeType) {
@@ -65,12 +69,14 @@ export async function createApp(connectionString: string) {
       Gib den Begrenzungsrahmen ([ymin, xmin, ymax, xmax]) fuer jeden erkannten Beleg an.
       Sei so genau wie moeglich. Wenn ein Wert fehlt, gib eine plausible Schaetzung ab oder lasse ihn null.
       Kategorisiere jede Ausgabe in eine der folgenden Kategorien: ${(categoryNames || []).join(', ') || 'Sonstiges'}.`;
+      promptText = prompt;
       contents = [{ role: 'user', parts: [{ text: prompt }, { inlineData: { data: base64Image, mimeType } }] }];
     } else if (action === 'parse-text') {
       const prompt = `Analysiere diesen Text, der eine oder mehrere Bestellungen oder Quittungsinformationen enthaelt.
       Extrahiere alle Details wie Haendler, Datum (YYYY-MM-DD), Gesamtbetrag, Waehrung und einzelne Posten.
       Suche bei den Posten auch nach Bild-URLs, falls diese im Text enthalten sind.
       Kategorisiere die Ausgabe in: ${(categoryNames || []).join(', ') || 'Sonstiges'}.`;
+      promptText = prompt;
       contents = [{ role: 'user', parts: [{ text: prompt }, { text: text || '' }] }];
     } else if (action === 'parse-csv') {
       const prompt = `Analysiere diese Amazon-Bestellhistorie im CSV-Format.
@@ -86,12 +92,14 @@ export async function createApp(connectionString: string) {
       Kategorisiere jede Bestellung in eine der folgenden Kategorien: ${(categoryNames || []).join(', ') || 'Sonstiges'}.
       Fuege im Feld tags immer "Amazon CSV" hinzu.
       Wenn eine Order ID vorhanden ist, fuege zusaetzlich einen Tag im Format "Order: <id>" hinzu.`;
+      promptText = prompt;
       contents = [{ role: 'user', parts: [{ text: prompt }, { text: text || '' }] }];
     } else {
       return res.status(400).json({ error: 'Invalid action' });
     }
 
     try {
+      console.log(`[Gemini Request - ${action}]`, promptText);
       const response = await model.generateContent({
         contents,
         generationConfig: {
@@ -100,6 +108,14 @@ export async function createApp(connectionString: string) {
         },
       });
       const rawResponse = response.response.text();
+      console.log(`[Gemini Response - ${action}]`, rawResponse);
+
+      lastAiResult = {
+        prompt: promptText,
+        response: rawResponse,
+        timestamp: new Date().toISOString()
+      };
+
       try {
         res.json(JSON.parse(rawResponse));
       } catch (error: unknown) {

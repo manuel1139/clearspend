@@ -164,6 +164,7 @@ export default function App() {
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
   const [draggedCategoryIndex, setDraggedCategoryIndex] = useState<number | null>(null);
   const [geminiApiKey, setGeminiApiKey] = useState<string | null>(null);
+  const [lastAiResult, setLastAiResult] = useState<{ prompt: string; response: string; timestamp: string } | null>(null);
   const [detectedEnvKeys, setDetectedEnvKeys] = useState<string[]>([]);
 
   const [activeScreen, setActiveScreen] = useState<
@@ -171,14 +172,21 @@ export default function App() {
   >('dashboard');
 
   useEffect(() => {
-    fetch('/api/gemini/status')
-      .then((res) => res.json())
-      .then((data) => {
-        setGeminiApiKey(data.apiKey);
-        setDetectedEnvKeys(data.detectedKeys || []);
-      })
-      .catch(() => setGeminiApiKey(null));
-  }, []);
+    if (activeScreen === 'debug') {
+      fetch('/api/gemini/status')
+        .then((res) => res.json())
+        .then((data) => {
+          setGeminiApiKey(data.apiKey);
+          setDetectedEnvKeys(data.detectedKeys || []);
+          setLastAiResult(data.lastAiResult);
+          if (data.lastAiResult) {
+            console.log('[AI Debug] Last Prompt:', data.lastAiResult.prompt);
+            console.log('[AI Debug] Last Response:', data.lastAiResult.response);
+          }
+        })
+        .catch(() => setGeminiApiKey(null));
+    }
+  }, [activeScreen]);
 
   const [accounts, setAccounts] = useState<AccountOverview[]>(MOCK_ACCOUNTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -493,9 +501,6 @@ export default function App() {
             <div className="space-y-5">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                    ClearSpend Mobile
-                  </p>
                   <h1 className="mt-2 text-[2rem] font-semibold tracking-tight text-slate-950">
                     {activeScreen === 'dashboard'
                       ? 'Dashboard'
@@ -986,6 +991,23 @@ export default function App() {
                           </p>
                         )}
                       </div>
+                      {lastAiResult && (
+                        <div className="col-span-2 space-y-3 rounded-2xl bg-white/5 p-3">
+                          <div>
+                            <p className="text-white/50 text-[10px]">Last AI Result ({new Date(lastAiResult.timestamp).toLocaleTimeString()})</p>
+                            <p className="mt-2 text-[10px] font-bold text-white/40 uppercase tracking-wider">Prompt</p>
+                            <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap font-mono text-[9px] text-white/70">
+                              {lastAiResult.prompt}
+                            </pre>
+                          </div>
+                          <div className="border-t border-white/5 pt-2">
+                            <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Response</p>
+                            <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[9px] text-green-400/80">
+                              {lastAiResult.response}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
