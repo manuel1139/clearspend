@@ -5,6 +5,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Cog,
   FileImage,
   Landmark,
@@ -39,6 +40,7 @@ import type { AccountOverview } from './lib/mockAccounts';
 const CATEGORY_STACK_FALLBACK = ['Alle', 'Einkaufen', 'Essen'];
 const HISTORY_RANGE_OPTIONS: { value: DateRangePreset; label: string }[] = [
   { value: 'all', label: 'All' },
+  { value: 'current-year', label: 'This year' },
   { value: 'current-month', label: 'Current month' },
   { value: 'last-month', label: 'Last month' },
   { value: 'last-year', label: 'Last year' },
@@ -78,6 +80,16 @@ function parseCurrencyValue(value: string) {
   const normalized = value.replace(/[^0-9,.-]/g, '').replace(',', '.');
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatCurrencyAmount(currency: string | undefined, amount: number) {
+  return `${currency ?? 'EUR'} ${amount.toFixed(2)}`;
+}
+
+function getReceiptProductNames(receipt: { items?: { name: string }[] }) {
+  return receipt.items
+    ?.map((item) => item.name.trim())
+    .filter((name) => name.length > 0) ?? [];
 }
 
 function DataEntryTile({
@@ -182,6 +194,30 @@ export default function App() {
         : [],
     [activeCategoryName, receiptsInRange],
   );
+  const categoryStackTotals = useMemo(() => {
+    const totals = new Map<string, { amount: number; currency: string }>();
+    let allAmount = 0;
+    let allCurrency = 'EUR';
+
+    for (const receipt of receiptsInRange) {
+      const currency = receipt.currency || 'EUR';
+      const categoryTotal = totals.get(receipt.categoryName) ?? {
+        amount: 0,
+        currency,
+      };
+
+      categoryTotal.amount += receipt.total;
+      categoryTotal.currency = categoryTotal.currency || currency;
+      totals.set(receipt.categoryName, categoryTotal);
+
+      allAmount += receipt.total;
+      allCurrency = allCurrency === 'EUR' ? currency : allCurrency;
+    }
+
+    totals.set('Alle', { amount: allAmount, currency: allCurrency });
+
+    return totals;
+  }, [receiptsInRange]);
   const spendHistory = useMemo(
     () => buildSpendHistory(receipts.receipts, selectedRange),
     [receipts.receipts, selectedRange],
@@ -318,24 +354,32 @@ export default function App() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setActiveScreen('intake')}
-                    aria-label="Open data entry"
-                    className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)] ${
-                      activeScreen === 'intake'
-                        ? 'bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)]'
-                        : 'bg-white/16'
-                    }`}
-                  >
-                    <SquarePen size={18} />
-                  </button>
-                  <button
-                    onClick={() => setActiveScreen('config')}
-                    aria-label="Open configuration"
-                    className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
-                  >
-                    <Cog size={18} />
-                  </button>
+                  {activeScreen === 'intake' ? (
+                    <button
+                      onClick={() => setActiveScreen('dashboard')}
+                      aria-label="Back to dashboard"
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setActiveScreen('intake')}
+                        aria-label="Open data entry"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                      >
+                        <SquarePen size={18} />
+                      </button>
+                      <button
+                        onClick={() => setActiveScreen('config')}
+                        aria-label="Open configuration"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
+                      >
+                        <Cog size={18} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -374,7 +418,15 @@ export default function App() {
                           }`}
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-semibold text-white">{categoryName}</p>
+                            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">
+                              {categoryName}
+                            </p>
+                            <p className="shrink-0 text-right text-sm font-semibold tabular-nums text-white/86">
+                              {formatCurrencyAmount(
+                                categoryStackTotals.get(categoryName)?.currency,
+                                categoryStackTotals.get(categoryName)?.amount ?? 0,
+                              )}
+                            </p>
                       </div>
                     </button>
                   ))}
@@ -404,10 +456,18 @@ export default function App() {
                               onClick={() => receipts.setSelectedReceipt(receipt)}
                               className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
                             >
-                              <div>
+                              <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium text-white">
                                   {receipt.merchant}
                                 </p>
+                                {getReceiptProductNames(receipt).length > 0 && (
+                                  <p className="mt-1 truncate text-xs text-white/78">
+                                    {getReceiptProductNames(receipt)[0]}
+                                    {getReceiptProductNames(receipt).length > 1
+                                      ? ` +${getReceiptProductNames(receipt).length - 1}`
+                                      : ''}
+                                  </p>
+                                )}
                                 <p className="mt-1 text-xs text-white/68">
                                   {new Date(receipt.date).toLocaleDateString()}
                                 </p>

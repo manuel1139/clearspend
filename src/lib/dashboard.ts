@@ -22,6 +22,7 @@ export interface SpendHistoryPoint {
 
 export type DateRangePreset =
   | 'all'
+  | 'current-year'
   | 'current-month'
   | 'last-month'
   | 'last-year'
@@ -68,6 +69,11 @@ export function resolveDateRange(
     case 'current-month':
       return {
         start: startOfDay(startOfMonth(now)),
+        end: endOfDay(now),
+      };
+    case 'current-year':
+      return {
+        start: startOfDay(new Date(now.getFullYear(), 0, 1)),
         end: endOfDay(now),
       };
     case 'last-month': {

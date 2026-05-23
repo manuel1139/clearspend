@@ -65,6 +65,12 @@ function buildReceiptListSchema(categoryNames: string[]) {
                 },
               },
             },
+            tags: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description:
+                'Optional list of tags to persist with the receipt, such as source labels or order identifiers.',
+            },
             box_2d: {
               type: Type.ARRAY,
               items: { type: Type.NUMBER },
@@ -127,6 +133,45 @@ export async function parseOrderText(
   Extrahiere alle Details wie Haendler, Datum (YYYY-MM-DD), Gesamtbetrag, Waehrung und einzelne Posten.
   Suche bei den Posten auch nach Bild-URLs, falls diese im Text enthalten sind.
   Kategorisiere die Ausgabe in: ${categoryList || 'Sonstiges'}.`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [
+      {
+        parts: [{ text: prompt }, { text }],
+      },
+    ],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: buildReceiptListSchema(categoryNames),
+    },
+  });
+
+  const parsed = JSON.parse(response.text!) as { receipts: ScannedReceipt[] };
+  return parsed.receipts;
+}
+
+export async function parseAmazonCsvText(
+  text: string,
+  categoryNames: string[],
+): Promise<ScannedReceipt[]> {
+  const ai = getAI();
+  const categoryList = categoryNames.join(', ');
+
+  const prompt = `Analysiere diese Amazon-Bestellhistorie im CSV-Format.
+  Die Daten koennen mehrere Zeilen pro Bestellung enthalten.
+  Gruppiere Zeilen mit derselben Order ID zu genau einer Bestellung.
+  Ignoriere stornierte Bestellungen.
+  Ignoriere ausserdem Bestellungen oder Positionen, wenn klar ist, dass sie zurueckgesendet und erstattet wurden.
+  Fuehre identische Produkte innerhalb derselben Bestellung nur einmal auf und vermeide doppelte items in der Ausgabe.
+  Extrahiere fuer jede Bestellung:
+  merchant, date als YYYY-MM-DD, total, currency, category und items.
+  Verwende als merchant den Amazon-Marktplatz aus der CSV, zum Beispiel Amazon.de. Wenn nichts klar ist, verwende Amazon.
+  Fuer items extrahiere Produktname, Preis und Menge, wenn vorhanden.
+  Kategorisiere jede Bestellung in eine der folgenden Kategorien: ${categoryList || 'Sonstiges'}.
+  Fuege im Feld tags immer "Amazon CSV" hinzu.
+  Wenn eine Order ID vorhanden ist, fuege zusaetzlich einen Tag im Format "Order: <id>" hinzu.
+  Antworte nur mit JSON gemaess Schema.`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',

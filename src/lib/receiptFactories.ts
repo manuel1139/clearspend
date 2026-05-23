@@ -87,7 +87,7 @@ export function createReceiptFromParsedOrder(
     paymentRuleId: defaultPaymentRule.id,
     paymentRuleName: defaultPaymentRule.name,
     paymentRuleFrequency: defaultPaymentRule.frequency,
-    tags: ['Pasted Text'],
+    tags: result.tags && result.tags.length > 0 ? result.tags : ['Pasted Text'],
     items: result.items ?? [],
     createdAt: new Date().toISOString(),
   };

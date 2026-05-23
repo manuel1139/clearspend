@@ -21,7 +21,7 @@ interface ConfigPageProps {
   onDeleteAccount: (accountId: string) => void;
   onSaveCategory: (
     category: Partial<ReceiptCategory> & Pick<ReceiptCategory, 'name'>,
-  ) => void | Promise<void>;
+  ) => ReceiptCategory | void | Promise<ReceiptCategory | void>;
   onDeleteCategory: (categoryId: number) => void | Promise<void>;
 }
 
@@ -39,6 +39,16 @@ function createEmptyAccount(): AccountOverview {
     detail: '',
     syncedAt: 'Not synced yet',
   };
+}
+
+function createEmptyCategory(): Partial<ReceiptCategory> & Pick<ReceiptCategory, 'name'> {
+  return { name: '' };
+}
+
+function getReceiptProductNames(receipt: Receipt) {
+  return receipt.items
+    ?.map((item) => item.name.trim())
+    .filter((name) => name.length > 0) ?? [];
 }
 
 export function ConfigPage({
@@ -65,11 +75,7 @@ export function ConfigPage({
   );
   const [draftCategory, setDraftCategory] = useState<
     Partial<ReceiptCategory> & Pick<ReceiptCategory, 'name'>
-  >(
-    categories[0]
-      ? { id: categories[0].id, name: categories[0].name }
-      : { name: '' },
-  );
+  >(categories[0] ? { id: categories[0].id, name: categories[0].name } : createEmptyCategory());
 
   const displayedAccount = accounts.some(
     (account) => account.id === draftAccount.id,
@@ -105,10 +111,44 @@ export function ConfigPage({
   const handleCategorySave = async () => {
     if (!displayedCategory.name.trim()) return;
 
-    await onSaveCategory({
+    const savedCategory = await onSaveCategory({
       id: displayedCategory.id,
       name: displayedCategory.name.trim(),
     });
+
+    if (savedCategory) {
+      setDraftCategory({
+        id: savedCategory.id,
+        name: savedCategory.name,
+      });
+      return;
+    }
+
+    setDraftCategory((current) => ({
+      ...current,
+      name: displayedCategory.name.trim(),
+    }));
+  };
+
+  const handleCategoryDelete = async () => {
+    if (displayedCategory.id === undefined) return;
+
+    const currentIndex = categories.findIndex(
+      (category) => category.id === displayedCategory.id,
+    );
+
+    await onDeleteCategory(displayedCategory.id);
+
+    const nextCategory =
+      categories[currentIndex + 1] ??
+      categories[currentIndex - 1] ??
+      null;
+
+    setDraftCategory(
+      nextCategory
+        ? { id: nextCategory.id, name: nextCategory.name }
+        : createEmptyCategory(),
+    );
   };
 
   const isExistingAccount = accounts.some(
@@ -119,12 +159,12 @@ export function ConfigPage({
   );
   const quickLinks: {
     id: 'accounts' | 'receipts' | 'budget' | 'mapping';
-    label: 'Accounts' | 'Receipts' | 'Budget' | 'Mapping';
+    label: 'Accounts' | 'Receipts' | 'Budget' | 'Kategorie';
   }[] = [
     { id: 'accounts', label: 'Accounts' },
     { id: 'receipts', label: 'Receipts' },
     { id: 'budget', label: 'Budget' },
-    { id: 'mapping', label: 'Mapping' },
+    { id: 'mapping', label: 'Kategorie' },
   ];
 
   return (
@@ -387,6 +427,7 @@ export function ConfigPage({
             <div className="rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm max-h-72 overflow-y-auto">
               {receipts.map((receipt) => {
                 const isActive = receipt.id === displayedReceipt?.id;
+                const productNames = getReceiptProductNames(receipt);
                 return (
                   <button
                     key={receipt.id}
@@ -405,6 +446,12 @@ export function ConfigPage({
                         <p className="mt-1 text-xs uppercase tracking-[0.2em] text-white/70">
                           {receipt.categoryName}
                         </p>
+                        {productNames.length > 0 && (
+                          <p className="mt-2 text-xs text-white/78">
+                            {productNames[0]}
+                            {productNames.length > 1 ? ` +${productNames.length - 1}` : ''}
+                          </p>
+                        )}
                         {isActive && (
                           <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/78">
                             Current selection
@@ -441,6 +488,21 @@ export function ConfigPage({
 
             {displayedReceipt ? (
               <div className="space-y-4">
+                {getReceiptProductNames(displayedReceipt).length > 0 && (
+                  <div className="rounded-[1.2rem] border border-white/20 bg-white/80 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.22em] text-[#B56A8F]">
+                      Product name
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {getReceiptProductNames(displayedReceipt).map((productName) => (
+                        <p key={productName} className="text-sm font-semibold text-[#45152F]">
+                          {productName}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-3">
                   <div className="rounded-[1.2rem] border border-white/20 bg-white/80 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.22em] text-[#B56A8F]">
@@ -510,15 +572,15 @@ export function ConfigPage({
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-[0.28em] text-[#B56A8F]">
-                Categories
+                Kategorie
               </p>
               <h2 className="mt-1 text-xl font-semibold text-[#45152F]">
-                Receipt mapping
+                Kategorie
               </h2>
             </div>
             <button
               onClick={() => {
-                setDraftCategory({ name: '' });
+                setDraftCategory(createEmptyCategory());
               }}
               className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-2 text-sm font-medium text-[#9B2C66]"
             >
@@ -546,16 +608,22 @@ export function ConfigPage({
                 </button>
               );
             })}
+
+            {categories.length === 0 && (
+              <div className="rounded-3xl border border-dashed border-white/20 bg-white/50 px-4 py-5 text-sm text-[#9B2C66]">
+                No Kategorien yet. Create the first one here.
+              </div>
+            )}
           </div>
 
           <div className="mt-4 rounded-[1.7rem] bg-white/12 p-4 backdrop-blur-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-[0.28em] text-[#B56A8F]">
-                Category editor
+                Kategorie editor
               </p>
               <h2 className="mt-1 text-xl font-semibold text-[#45152F]">
-                Database-backed category
+                Edit Kategorie
               </h2>
             </div>
             <PencilLine size={18} className="text-[#B56A8F]" />
@@ -580,11 +648,7 @@ export function ConfigPage({
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             <button
-              onClick={() =>
-                displayedCategory.id !== undefined
-                  ? onDeleteCategory(displayedCategory.id)
-                  : undefined
-              }
+              onClick={() => void handleCategoryDelete()}
               disabled={!isExistingCategory}
               className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/40 px-4 py-2 text-sm font-medium text-[#9B2C66] disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -596,7 +660,7 @@ export function ConfigPage({
               onClick={() => void handleCategorySave()}
               className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(130,37,90,0.24)]"
             >
-              {isExistingCategory ? 'Save category' : 'Create category'}
+              {isExistingCategory ? 'Save Kategorie' : 'Create Kategorie'}
             </button>
           </div>
           </div>

@@ -42,6 +42,8 @@ export function useCategories(
           currentCategory.id === savedCategory.id ? savedCategory : currentCategory,
         );
       });
+
+      return savedCategory;
     } catch (error) {
       onError(
         error instanceof Error

@@ -16,6 +16,69 @@ function todayIsoDate() {
   return new Date().toISOString().split('T')[0];
 }
 
+function parseHeaderIndex(headers: string[], pattern: string) {
+  return headers.findIndex((header) => header.toLowerCase().includes(pattern));
+}
+
+function hasRefundOrReturnMarker(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes('return') ||
+    normalized.includes('returned') ||
+    normalized.includes('refund') ||
+    normalized.includes('refunded') ||
+    normalized.includes('rücksend') ||
+    normalized.includes('retoure') ||
+    normalized.includes('erstattet')
+  );
+}
+
+export function findRefundedAmazonOrderIds(text: string) {
+  const lines = text.split('\n');
+  if (lines.length < 2) {
+    return new Set<string>();
+  }
+
+  const headers = splitCsvLine(lines[0]);
+  const orderIdIdx = parseHeaderIndex(headers, 'order id');
+  const refundIdx = parseHeaderIndex(headers, 'refund');
+  const shippingRefundIdx = parseHeaderIndex(headers, 'shipping_refund');
+  const itemsIdx = parseHeaderIndex(headers, 'items');
+  const paymentsIdx = parseHeaderIndex(headers, 'payments');
+
+  const refundedOrderIds = new Set<string>();
+
+  for (let index = 1; index < lines.length; index++) {
+    const line = lines[index].trim();
+    if (!line) continue;
+
+    const row = splitCsvLine(line);
+    const orderId = orderIdIdx !== -1 ? row[orderIdIdx] : '';
+    if (!orderId) continue;
+
+    const refundAmount = refundIdx !== -1 ? parseCurrencyAmount(row[refundIdx] ?? '') : 0;
+    const shippingRefundAmount =
+      shippingRefundIdx !== -1 ? parseCurrencyAmount(row[shippingRefundIdx] ?? '') : 0;
+    const itemsValue = itemsIdx !== -1 ? row[itemsIdx] ?? '' : '';
+    const paymentsValue = paymentsIdx !== -1 ? row[paymentsIdx] ?? '' : '';
+
+    if (
+      refundAmount > 0 ||
+      (shippingRefundAmount > 0 && hasRefundOrReturnMarker(paymentsValue)) ||
+      hasRefundOrReturnMarker(itemsValue) ||
+      hasRefundOrReturnMarker(paymentsValue)
+    ) {
+      refundedOrderIds.add(orderId);
+    }
+  }
+
+  return refundedOrderIds;
+}
+
 export function parseAmazonOrdersCsv(
   text: string,
   existingReceipts: Receipt[],
@@ -33,30 +96,14 @@ export function parseAmazonOrdersCsv(
   }
 
   const headers = splitCsvLine(lines[0]);
-  const dateIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('order date'),
-  );
-  const merchantIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('website'),
-  );
-  const totalIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('total amount'),
-  );
-  const currencyIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('currency'),
-  );
-  const titleIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('product name'),
-  );
-  const statusIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('order status'),
-  );
-  const orderIdIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('order id'),
-  );
-  const itemTotalIdx = headers.findIndex((header) =>
-    header.toLowerCase().includes('item total'),
-  );
+  const dateIdx = parseHeaderIndex(headers, 'order date');
+  const merchantIdx = parseHeaderIndex(headers, 'website');
+  const totalIdx = parseHeaderIndex(headers, 'total amount');
+  const currencyIdx = parseHeaderIndex(headers, 'currency');
+  const titleIdx = parseHeaderIndex(headers, 'product name');
+  const statusIdx = parseHeaderIndex(headers, 'order status');
+  const orderIdIdx = parseHeaderIndex(headers, 'order id');
+  const itemTotalIdx = parseHeaderIndex(headers, 'item total');
 
   const ordersMap = new Map<string, Receipt>();
   let skippedCount = 0;

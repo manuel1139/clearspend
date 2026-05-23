@@ -41,6 +41,7 @@ export interface ScannedReceipt {
   date?: string;
   currency?: string;
   items?: ReceiptItem[];
+  tags?: string[];
   box_2d?: [number, number, number, number];
 }
 
