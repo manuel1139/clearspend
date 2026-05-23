@@ -5,9 +5,37 @@ export interface ParsedKontoImportResult {
   detectedFormats: string[];
 }
 
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+
+  if (!text) {
+    throw new Error(`Server returned an empty response (${response.status}).`);
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Server returned invalid JSON (${response.status}). ${text.slice(0, 160)}`,
+    );
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      parsed && typeof parsed === 'object' && 'error' in parsed
+        ? String((parsed as { error?: unknown }).error)
+        : `Request failed with status ${response.status}.`;
+    throw new Error(errorMessage);
+  }
+
+  return parsed as T;
+}
+
 export async function listKontoEntriesRequest(): Promise<KontoEntry[]> {
   const response = await fetch('/api/konto-entries');
-  return response.json();
+  return parseJsonResponse<KontoEntry[]>(response);
 }
 
 export async function saveKontoEntriesRequest(
@@ -19,7 +47,7 @@ export async function saveKontoEntriesRequest(
     body: JSON.stringify({ entries }),
   });
 
-  return response.json();
+  return parseJsonResponse<KontoEntry[]>(response);
 }
 
 export async function importKontoZipRequest(
@@ -32,5 +60,5 @@ export async function importKontoZipRequest(
     body: JSON.stringify({ fileName, base64 }),
   });
 
-  return response.json();
+  return parseJsonResponse<ParsedKontoImportResult>(response);
 }

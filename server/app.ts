@@ -11,8 +11,23 @@ export async function createApp(connectionString: string) {
   const pool = await initializeDatabase(connectionString);
   const repoRoot = findRepoRoot();
 
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '50mb' }));
   registerApiRoutes(app, pool);
+
+  app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'type' in error &&
+      error.type === 'entity.too.large'
+    ) {
+      return res.status(413).json({
+        error: 'Import file is too large. Please try a smaller ZIP export.',
+      });
+    }
+
+    return next(error);
+  });
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
