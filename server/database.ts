@@ -81,7 +81,8 @@ async function ensureSchema(pool: sql.ConnectionPool) {
     BEGIN
       CREATE TABLE Categories (
         id INT IDENTITY(1,1) PRIMARY KEY,
-        name NVARCHAR(100) NOT NULL
+        name NVARCHAR(100) NOT NULL,
+        displayOrder INT DEFAULT 0
       )
     END
 
@@ -184,6 +185,11 @@ async function ensureSchema(pool: sql.ConnectionPool) {
     IF COL_LENGTH('dbo.Receipts', 'kontoReference') IS NULL
     BEGIN
       ALTER TABLE Receipts ADD kontoReference NVARCHAR(MAX) NULL
+    END
+
+    IF COL_LENGTH('dbo.Categories', 'displayOrder') IS NULL
+    BEGIN
+      ALTER TABLE Categories ADD displayOrder INT DEFAULT 0
     END
 
     IF COL_LENGTH('dbo.KontoEntries', 'counterpartyId') IS NULL
@@ -299,6 +305,15 @@ async function ensureSchema(pool: sql.ConnectionPool) {
 }
 
 export async function initializeDatabase(connectionString: string) {
+  if (process.env.NODE_ENV === 'production') {
+    console.log('[Backend] Initializing in production mode');
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('[Backend] WARNING: GEMINI_API_KEY is missing from environment variables.');
+    } else {
+      console.log('[Backend] GEMINI_API_KEY detected.');
+    }
+  }
+
   const pool = await sql.connect(connectionString);
   await ensureSchema(pool);
   return pool;
@@ -331,7 +346,7 @@ export async function updateBudget(
 export async function listReceiptCategories(pool: sql.ConnectionPool) {
   const result = await pool
     .request()
-    .query('SELECT id, name FROM Categories ORDER BY name ASC');
+    .query('SELECT id, name, displayOrder FROM Categories ORDER BY displayOrder ASC, name ASC');
   return result.recordset as ReceiptCategory[];
 }
 
@@ -496,6 +511,22 @@ export async function saveCategory(
     `);
 
   return insertResult.recordset[0] as ReceiptCategory;
+}
+
+export async function updateCategoriesOrder(
+  pool: sql.ConnectionPool,
+  orders: { id: number; displayOrder: number }[],
+) {
+  for (const item of orders) {
+    await pool
+      .request()
+      .input('id', sql.Int, item.id)
+      .input('order', sql.Int, item.displayOrder).query(`
+        UPDATE Categories
+        SET displayOrder = @order
+        WHERE id = @id
+      `);
+  }
 }
 
 export async function countReceiptsByCategory(

@@ -17,15 +17,14 @@ Because this repository contains a `yarn.lock`, Azure/Oryx may choose Yarn autom
 
 ## Required App Settings
 
-Set these in Azure App Service Configuration:
+Set these in Azure App Service under **Settings > Configuration > Application settings** (do **NOT** use "Connection strings" for the API key):
 
 - `AZURE_SQL_CONNECTION_STRING`
 - `NODE_ENV=production`
 - `SCM_DO_BUILD_DURING_DEPLOYMENT=true`
-
-Set this as well if AI receipt scanning/import is used:
-
 - `GEMINI_API_KEY`
+
+> **Important:** Azure injects "Application settings" as standard environment variables (e.g., `process.env.GEMINI_API_KEY`). If you place the API key in the "Connection strings" section, Azure will prefix it based on the type (e.g., `CUSTOMCONNSTR_GEMINI_API_KEY`), which will cause the application to fail to find it by its raw name.
 
 ## Port Handling
 

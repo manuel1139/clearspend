@@ -159,9 +159,9 @@ export default function App() {
   const [historyRange, setHistoryRange] = useState<DateRangePreset>('current-month');
   const [customRangeStart, setCustomRangeStart] = useState('');
   const [customRangeEnd, setCustomRangeEnd] = useState('');
-  const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(
-    'Alle',
-  );
+  const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
+  const [draggedCategoryIndex, setDraggedCategoryIndex] = useState<number | null>(null);
+
   const [activeScreen, setActiveScreen] = useState<
     'dashboard' | 'intake' | 'config' | 'konto'
   >('dashboard');
@@ -210,33 +210,13 @@ export default function App() {
       ),
     [kontoEntries.entries, receipts.receipts, selectedRange.end, selectedRange.start],
   );
+
   const categoryStackItems = useMemo(() => {
-    const categoryNames = categories.categories.map((category) => category.name);
-    const fallbackNames =
-      categoryNames.length > 0 ? ['Alle', ...categoryNames] : CATEGORY_STACK_FALLBACK;
-    const counts = new Map<string, number>();
+    const names = categories.categories.map((c) => c.name);
+    return ['Alle', ...names];
+  }, [categories.categories]);
 
-    for (const receipt of receiptsInRange) {
-      counts.set(receipt.categoryName, (counts.get(receipt.categoryName) ?? 0) + 1);
-    }
-
-    if (unmatchedKontoEntriesInRange.length > 0) {
-      counts.set(
-        'Sonstiges',
-        (counts.get('Sonstiges') ?? 0) + unmatchedKontoEntriesInRange.length,
-      );
-    }
-
-    const prioritized = [...counts.entries()]
-      .sort((left, right) => right[1] - left[1])
-      .map(([name]) => name);
-    const remaining = fallbackNames.filter((name) => name !== 'Alle' && !prioritized.includes(name));
-
-    return ['Alle', ...prioritized, ...remaining];
-  }, [categories.categories, receiptsInRange, unmatchedKontoEntriesInRange.length]);
-  const activeCategoryName = categoryStackItems.includes(selectedCategoryName ?? '')
-    ? selectedCategoryName
-    : (categoryStackItems[0] ?? null);
+  const activeCategoryName = selectedCategoryName;
   const activeCategoryItems = useMemo<DashboardListItem[]>(
     () => {
       const receiptItems = receiptsInRange.map((receipt) => ({
@@ -373,6 +353,43 @@ export default function App() {
     setAccounts((currentAccounts) =>
       currentAccounts.filter((account) => account.id !== accountId),
     );
+  };
+
+  const handleCategoryDragStart = (index: number) => {
+    // Offset by 1 because 'Alle' is at index 0 and isn't draggable in the DB sense
+    if (index === 0) return;
+    setDraggedCategoryIndex(index - 1);
+  };
+
+  const handleCategoryDrop = async (index: number) => {
+    if (draggedCategoryIndex === null || index === 0) return;
+    const targetIndex = index - 1;
+    if (draggedCategoryIndex === targetIndex) return;
+
+    const newCategories = [...categories.categories];
+    const [moved] = newCategories.splice(draggedCategoryIndex, 1);
+    newCategories.splice(targetIndex, 0, moved);
+
+    const reorders = newCategories.map((cat, idx) => ({
+      id: cat.id,
+      displayOrder: idx,
+    }));
+
+    try {
+      const response = await fetch('/api/categories/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: reorders }),
+      });
+
+      if (response.ok) {
+        await categories.refreshCategories();
+      }
+    } catch (err) {
+      setError('Failed to save new category order.');
+    } finally {
+      setDraggedCategoryIndex(null);
+    }
   };
 
   return (
@@ -514,13 +531,24 @@ export default function App() {
                       <Sparkles size={18} className="mt-1 text-[#FFD0E6]" />
                     </div>
 
-                <div className="mt-3 h-72 overflow-y-auto overscroll-contain rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+                <div className="mt-3 h-[32rem] overflow-y-auto overscroll-contain rounded-[1.7rem] bg-white/10 p-3 backdrop-blur-sm touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
                   <div className="flex w-full flex-col gap-3">
                   {categoryStackItems.map((categoryName, index) => (
-                    <button
-                      type="button"
+                    <div
                       key={categoryName}
-                          onClick={() => setSelectedCategoryName(categoryName)}
+                      draggable={index > 0}
+                      onDragStart={() => handleCategoryDragStart(index)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => handleCategoryDrop(index)}
+                      className={`flex flex-col gap-2 transition-opacity ${
+                        draggedCategoryIndex === index - 1 ? 'opacity-40' : 'opacity-100'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                          onClick={() =>
+                            setSelectedCategoryName((curr) => (curr === categoryName ? null : categoryName))
+                          }
                           className={`rounded-[1.4rem] bg-linear-to-br ${
                             accounts[index % accounts.length]?.accent ??
                             'from-[#FF5FA2] via-[#FF78B5] to-[#FF9BCB]'
@@ -542,60 +570,51 @@ export default function App() {
                                 categoryStackTotals.get(categoryName)?.amount ?? 0,
                               )}
                             </p>
-                      </div>
-                    </button>
+                          </div>
+                      </button>
+                      {activeCategoryName === categoryName && (
+                        <div className="space-y-2 py-1">
+                          {activeCategoryItems.length === 0 ? (
+                            <div className="rounded-[1.2rem] bg-white/5 px-3 py-3 text-xs text-white/60">
+                              No items for this category yet.
+                            </div>
+                          ) : (
+                            activeCategoryItems.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => {
+                                  if (item.receipt) {
+                                    receipts.setSelectedReceipt(item.receipt);
+                                  }
+                                }}
+                                className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-medium text-white">
+                                    {item.merchant}
+                                  </p>
+                                  {item.productLabel && (
+                                    <p className="mt-1 truncate text-xs text-white/78">
+                                      {item.productLabel}
+                                    </p>
+                                  )}
+                                  <p className="mt-1 text-xs text-white/68">
+                                    {new Date(item.date).toLocaleDateString()}
+                                  </p>
+                                </div>
+                                <p className="text-sm font-medium text-white/82">
+                                  {item.currency} {item.total.toFixed(2)}
+                                </p>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
                   ))}
                   </div>
                 </div>
-
-                <div className="mt-4 rounded-[1.7rem] bg-white/12 p-3 backdrop-blur-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
-                      {activeCategoryName ?? 'Kategorie'}
-                    </p>
-                    <p className="text-xs text-white/72">
-                      {activeCategoryItems.length} items
-                    </p>
-                  </div>
-
-                  <div className="mt-3 h-72 space-y-2 overflow-y-auto overscroll-contain touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
-                    {activeCategoryItems.length === 0 ? (
-                      <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
-                        No receipt items for this category yet.
-                          </div>
-                        ) : (
-                          activeCategoryItems.map((item) => (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() => {
-                                if (item.receipt) {
-                                  receipts.setSelectedReceipt(item.receipt);
-                                }
-                              }}
-                              className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-medium text-white">
-                                  {item.merchant}
-                                </p>
-                                {item.productLabel && (
-                                  <p className="mt-1 truncate text-xs text-white/78">
-                                    {item.productLabel}
-                                  </p>
-                                )}
-                                <p className="mt-1 text-xs text-white/68">
-                                  {new Date(item.date).toLocaleDateString()}
-                                </p>
-                              </div>
-                              <p className="text-sm font-medium text-white/82">
-                                {item.currency} {item.total.toFixed(2)}
-                              </p>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

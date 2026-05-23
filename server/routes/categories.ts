@@ -6,6 +6,7 @@ import {
   deleteCategory,
   listReceiptCategories,
   saveCategory,
+  updateCategoriesOrder,
 } from '../database.js';
 
 export function createCategoriesRouter(pool: sql.ConnectionPool) {
@@ -39,6 +40,16 @@ export function createCategoriesRouter(pool: sql.ConnectionPool) {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Failed to save category' });
+    }
+  });
+
+  router.post('/reorder', async (req, res) => {
+    try {
+      const { orders } = req.body as { orders: { id: number; displayOrder: number }[] };
+      await updateCategoriesOrder(pool, orders);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to reorder categories' });
     }
   });
 
