@@ -26,8 +26,8 @@ export async function createApp(connectionString: string) {
 
   app.use(express.json({ limit: '50mb' }));
 
-  // Check for the correct key and the specific typo mentioned in the environment
-  const apiKey = (process.env.GEMINI_API_KEY || process.env.GEMNIY_KEY)?.trim();
+  // Use the correct environment variable for Gemini
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   const ai = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
   app.get('/api/gemini/status', (_req, res) => {
@@ -109,6 +109,17 @@ export async function createApp(connectionString: string) {
     } catch (error: unknown) {
       console.error('Gemini error:', error);
       res.status(500).json({ error: 'Failed to process request' });
+    }
+  });
+
+  app.get('/api/konto', async (_req, res) => {
+    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    try {
+      const entries = await listKontoEntries(pool);
+      res.json(entries);
+    } catch (error) {
+      console.error('Failed to fetch konto entries:', error);
+      res.status(500).json({ error: 'Failed to load entries' });
     }
   });
 

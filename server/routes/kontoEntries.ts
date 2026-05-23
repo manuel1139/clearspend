@@ -10,7 +10,8 @@ export function createKontoEntriesRouter(pool: sql.ConnectionPool) {
   router.get('/', async (_req, res) => {
     try {
       res.json(await listKontoEntries(pool));
-    } catch {
+    } catch (error) {
+      console.error('Failed to read konto entries:', error);
       res.status(500).json({ error: 'Failed to read konto entries' });
     }
   });

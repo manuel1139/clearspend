@@ -384,7 +384,7 @@ export async function listReceiptCategories(pool: sql.ConnectionPool) {
 export async function listKontoEntries(pool: sql.ConnectionPool) {
   const result = await pool.request().query(`
     SELECT
-      id,
+      KontoEntries.id,
       bookingDate,
       valueDate,
       amount,
@@ -401,7 +401,7 @@ export async function listKontoEntries(pool: sql.ConnectionPool) {
       KontoEntries.createdAt
     FROM KontoEntries
     LEFT JOIN Categories ON Categories.id = KontoEntries.categoryId
-    ORDER BY bookingDate DESC, createdAt DESC
+    ORDER BY KontoEntries.bookingDate DESC, KontoEntries.createdAt DESC
   `);
 
   return result.recordset.map(mapKontoEntryRecord);
@@ -513,7 +513,7 @@ export async function saveKontoEntries(
         END
 
         SELECT
-          id,
+          KontoEntries.id,
           bookingDate,
           valueDate,
           amount,
@@ -530,7 +530,7 @@ export async function saveKontoEntries(
           KontoEntries.createdAt
         FROM KontoEntries
         LEFT JOIN Categories ON Categories.id = KontoEntries.categoryId
-        WHERE id = @id
+        WHERE KontoEntries.id = @id
       `);
 
     savedEntries.push(mapKontoEntryRecord(result.recordset[0]));
