@@ -5,6 +5,10 @@ const API_KEY = process.env.GEMINI_API_KEY;
 
 let ai: GoogleGenAI | null = null;
 
+export function isGeminiConfigured() {
+  return Boolean(API_KEY);
+}
+
 export function getAI() {
   if (!ai) {
     if (!API_KEY) {

@@ -114,9 +114,8 @@ export function ImportHubModal({
               />
               <ActionTile
                 icon={<Landmark size={20} />}
-                title="Upload banking data"
-                description="Reserve entry point for connected statements and bank transaction imports."
-                badge="Later"
+                title="Konto ZIP"
+                description="Import a ZIP file with CAMT.008 account data and link it to receipts."
                 onClick={onUploadBankData}
               />
             </div>

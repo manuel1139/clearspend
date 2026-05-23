@@ -25,6 +25,7 @@ import { ConfigPage } from './components/ConfigPage';
 import { useBudget } from './hooks/useBudget';
 import { useCategories } from './hooks/useCategories';
 import { usePaymentRules } from './hooks/usePaymentRules';
+import { useKontoEntries } from './hooks/useKontoEntries';
 import { useReceiptImport } from './hooks/useReceiptImport';
 import { useReceipts } from './hooks/useReceipts';
 import {
@@ -36,6 +37,7 @@ import {
 } from './lib/dashboard';
 import { MOCK_ACCOUNTS } from './lib/mockAccounts';
 import type { AccountOverview } from './lib/mockAccounts';
+import type { KontoEntry, Receipt } from './types';
 
 const CATEGORY_STACK_FALLBACK = ['Alle', 'Einkaufen', 'Essen'];
 const HISTORY_RANGE_OPTIONS: { value: DateRangePreset; label: string }[] = [
@@ -92,6 +94,23 @@ function getReceiptProductNames(receipt: { items?: { name: string }[] }) {
     .filter((name) => name.length > 0) ?? [];
 }
 
+function isDateWithinRange(date: string, start: Date, end: Date) {
+  const value = new Date(date);
+  return value >= start && value <= end;
+}
+
+interface DashboardListItem {
+  id: string;
+  merchant: string;
+  date: string;
+  total: number;
+  currency: string;
+  categoryName: string;
+  productLabel?: string;
+  receipt?: Receipt;
+  kontoEntry?: KontoEntry;
+}
+
 function DataEntryTile({
   icon,
   title,
@@ -118,6 +137,21 @@ function DataEntryTile({
   );
 }
 
+function formatImportKind(kind: string | null) {
+  switch (kind) {
+    case 'receipt-image':
+      return 'Receipt image';
+    case 'amazon-text':
+      return 'Amazon text';
+    case 'amazon-csv':
+      return 'Amazon CSV';
+    case 'konto-zip':
+      return 'Konto ZIP';
+    default:
+      return 'No import yet';
+  }
+}
+
 export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isImportHubOpen, setIsImportHubOpen] = useState(false);
@@ -134,9 +168,11 @@ export default function App() {
   const [accounts, setAccounts] = useState<AccountOverview[]>(MOCK_ACCOUNTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const kontoZipInputRef = useRef<HTMLInputElement>(null);
 
   const categories = useCategories(setError);
   const paymentRules = usePaymentRules(setError);
+  const kontoEntries = useKontoEntries(setError);
   const receipts = useReceipts(
     setError,
     categories.categories,
@@ -149,8 +185,10 @@ export default function App() {
     receipts: receipts.receipts,
     onError: setError,
     onImportedReceipts: receipts.prependReceipts,
+    onMergeReceipts: receipts.mergeReceipts,
     onReviewReceipts: receipts.startReview,
     onClearReview: receipts.clearReview,
+    onRefreshKontoEntries: kontoEntries.refreshEntries,
   });
   const selectedRange = useMemo(
     () =>
@@ -163,6 +201,15 @@ export default function App() {
     () => filterReceiptsByDateRange(receipts.receipts, selectedRange),
     [receipts.receipts, selectedRange],
   );
+  const unmatchedKontoEntriesInRange = useMemo(
+    () =>
+      kontoEntries.entries.filter(
+        (entry) =>
+          !receipts.receipts.some((receipt) => receipt.kontoEntryId === entry.id) &&
+          isDateWithinRange(entry.bookingDate, selectedRange.start, selectedRange.end),
+      ),
+    [kontoEntries.entries, receipts.receipts, selectedRange.end, selectedRange.start],
+  );
   const categoryStackItems = useMemo(() => {
     const categoryNames = categories.categories.map((category) => category.name);
     const fallbackNames =
@@ -173,26 +220,70 @@ export default function App() {
       counts.set(receipt.categoryName, (counts.get(receipt.categoryName) ?? 0) + 1);
     }
 
+    if (unmatchedKontoEntriesInRange.length > 0) {
+      counts.set(
+        'Sonstiges',
+        (counts.get('Sonstiges') ?? 0) + unmatchedKontoEntriesInRange.length,
+      );
+    }
+
     const prioritized = [...counts.entries()]
       .sort((left, right) => right[1] - left[1])
       .map(([name]) => name);
     const remaining = fallbackNames.filter((name) => name !== 'Alle' && !prioritized.includes(name));
 
     return ['Alle', ...prioritized, ...remaining];
-  }, [categories.categories, receiptsInRange]);
+  }, [categories.categories, receiptsInRange, unmatchedKontoEntriesInRange.length]);
   const activeCategoryName = categoryStackItems.includes(selectedCategoryName ?? '')
     ? selectedCategoryName
     : (categoryStackItems[0] ?? null);
-  const activeCategoryReceipts = useMemo(
-    () =>
-      activeCategoryName
-        ? activeCategoryName === 'Alle'
-          ? receiptsInRange
-          : receiptsInRange.filter(
-              (receipt) => receipt.categoryName === activeCategoryName,
-            )
-        : [],
-    [activeCategoryName, receiptsInRange],
+  const activeCategoryItems = useMemo<DashboardListItem[]>(
+    () => {
+      const receiptItems = receiptsInRange.map((receipt) => ({
+        id: receipt.id,
+        merchant: receipt.merchant,
+        date: receipt.date,
+        total: receipt.total,
+        currency: receipt.currency,
+        categoryName: receipt.categoryName,
+        productLabel:
+          getReceiptProductNames(receipt)[0]
+            ? `${getReceiptProductNames(receipt)[0]}${
+                getReceiptProductNames(receipt).length > 1
+                  ? ` +${getReceiptProductNames(receipt).length - 1}`
+                  : ''
+              }`
+            : undefined,
+        receipt,
+      }));
+      const kontoItems = unmatchedKontoEntriesInRange.map((entry) => ({
+        id: entry.id,
+        merchant: entry.counterpartyName || 'Konto',
+        date: entry.bookingDate,
+        total: entry.amount,
+        currency: entry.currency,
+        categoryName: 'Sonstiges',
+        productLabel: entry.reference || entry.remittanceInfo,
+        kontoEntry: entry,
+      }));
+
+      let items: DashboardListItem[];
+      if (!activeCategoryName) {
+        items = [];
+      } else if (activeCategoryName === 'Alle') {
+        items = [...receiptItems, ...kontoItems];
+      } else if (activeCategoryName === 'Sonstiges') {
+        items = [
+          ...receiptItems.filter((item) => item.categoryName === 'Sonstiges'),
+          ...kontoItems,
+        ];
+      } else {
+        items = receiptItems.filter((item) => item.categoryName === activeCategoryName);
+      }
+
+      return items.sort((left, right) => right.date.localeCompare(left.date));
+    },
+    [activeCategoryName, receiptsInRange, unmatchedKontoEntriesInRange],
   );
   const categoryStackTotals = useMemo(() => {
     const totals = new Map<string, { amount: number; currency: string }>();
@@ -214,10 +305,23 @@ export default function App() {
       allCurrency = allCurrency === 'EUR' ? currency : allCurrency;
     }
 
+    for (const entry of unmatchedKontoEntriesInRange) {
+      const categoryTotal = totals.get('Sonstiges') ?? {
+        amount: 0,
+        currency: entry.currency || 'EUR',
+      };
+
+      categoryTotal.amount += entry.amount;
+      totals.set('Sonstiges', categoryTotal);
+
+      allAmount += entry.amount;
+      allCurrency = allCurrency === 'EUR' ? entry.currency : allCurrency;
+    }
+
     totals.set('Alle', { amount: allAmount, currency: allCurrency });
 
     return totals;
-  }, [receiptsInRange]);
+  }, [receiptsInRange, unmatchedKontoEntriesInRange]);
   const spendHistory = useMemo(
     () => buildSpendHistory(receipts.receipts, selectedRange),
     [receipts.receipts, selectedRange],
@@ -240,11 +344,6 @@ export default function App() {
     }
 
     void receipts.deleteReceipt(receipts.selectedReceipt.id);
-  };
-
-  const handleBankDataClick = () => {
-    setIsImportHubOpen(false);
-    setError('Banking data upload is reserved for the next integration pass.');
   };
 
   const handleSaveAccount = (draftAccount: AccountOverview) => {
@@ -290,6 +389,13 @@ export default function App() {
         ref={csvInputRef}
         onChange={imports.handleCsvUpload}
         accept=".csv"
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={kontoZipInputRef}
+        onChange={imports.handleKontoZipUpload}
+        accept=".zip,application/zip"
         className="hidden"
       />
 
@@ -439,41 +545,42 @@ export default function App() {
                       {activeCategoryName ?? 'Kategorie'}
                     </p>
                     <p className="text-xs text-white/72">
-                      {activeCategoryReceipts.length} items
+                      {activeCategoryItems.length} items
                     </p>
                   </div>
 
                   <div className="mt-3 h-72 space-y-2 overflow-y-auto overscroll-contain touch-pan-y [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
-                    {activeCategoryReceipts.length === 0 ? (
+                    {activeCategoryItems.length === 0 ? (
                       <div className="rounded-[1.2rem] bg-white/10 px-3 py-3 text-sm text-white/78">
                         No receipt items for this category yet.
                           </div>
                         ) : (
-                          activeCategoryReceipts.map((receipt) => (
+                          activeCategoryItems.map((item) => (
                             <button
-                              key={receipt.id}
+                              key={item.id}
                               type="button"
-                              onClick={() => receipts.setSelectedReceipt(receipt)}
+                              onClick={() => {
+                                if (item.receipt) {
+                                  receipts.setSelectedReceipt(item.receipt);
+                                }
+                              }}
                               className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] bg-white/10 px-3 py-3 text-left transition hover:bg-white/16"
                             >
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium text-white">
-                                  {receipt.merchant}
+                                  {item.merchant}
                                 </p>
-                                {getReceiptProductNames(receipt).length > 0 && (
+                                {item.productLabel && (
                                   <p className="mt-1 truncate text-xs text-white/78">
-                                    {getReceiptProductNames(receipt)[0]}
-                                    {getReceiptProductNames(receipt).length > 1
-                                      ? ` +${getReceiptProductNames(receipt).length - 1}`
-                                      : ''}
+                                    {item.productLabel}
                                   </p>
                                 )}
                                 <p className="mt-1 text-xs text-white/68">
-                                  {new Date(receipt.date).toLocaleDateString()}
+                                  {new Date(item.date).toLocaleDateString()}
                                 </p>
                               </div>
                               <p className="text-sm font-medium text-white/82">
-                                {receipt.currency} {receipt.total.toFixed(2)}
+                                {item.currency} {item.total.toFixed(2)}
                               </p>
                             </button>
                           ))
@@ -512,6 +619,36 @@ export default function App() {
                     </p>
                   </div>
 
+                  <div className="rounded-[1.7rem] bg-white/12 p-4 text-white backdrop-blur-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                          Gemini status
+                        </p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {imports.geminiConfigured ? 'Configured' : 'Missing API key'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">
+                          Last import
+                        </p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {formatImportKind(imports.lastImportKind)}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-sm text-white/76">
+                      Status: {imports.lastImportPhase}
+                    </p>
+                    <p className="mt-1 text-sm text-white/76">
+                      {imports.lastImportMessage}
+                    </p>
+                    <p className="mt-3 text-xs text-white/60">
+                      Gemini is used for receipt images, Amazon text, and Amazon CSV. Konto ZIP and manual entry do not call Gemini.
+                    </p>
+                  </div>
+
                   <div className="grid gap-3 sm:grid-cols-2">
                     <DataEntryTile
                       icon={<FileImage size={20} />}
@@ -533,9 +670,9 @@ export default function App() {
                     />
                     <DataEntryTile
                       icon={<Landmark size={20} />}
-                      title="Banking data"
-                      description="Use the prepared entry point for future bank transaction imports."
-                      onClick={handleBankDataClick}
+                      title="Konto"
+                      description="Import a ZIP file with CAMT.008 account data and link it to receipts."
+                      onClick={() => kontoZipInputRef.current?.click()}
                     />
                     <DataEntryTile
                       icon={<SquarePen size={20} />}
@@ -579,7 +716,10 @@ export default function App() {
           setIsImportHubOpen(false);
           imports.setIsPasting(true);
         }}
-        onUploadBankData={handleBankDataClick}
+        onUploadBankData={() => {
+          setIsImportHubOpen(false);
+          kontoZipInputRef.current?.click();
+        }}
       />
 
       <AccountsDrawer

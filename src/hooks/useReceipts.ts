@@ -57,6 +57,24 @@ export function useReceipts(
     setReceipts((currentReceipts) => [...newReceipts, ...currentReceipts]);
   };
 
+  const mergeReceipts = (nextReceipts: Receipt[]) => {
+    setReceipts((currentReceipts) => {
+      const mergedReceipts = [...currentReceipts];
+
+      for (const receipt of nextReceipts) {
+        const index = mergedReceipts.findIndex((current) => current.id === receipt.id);
+        if (index === -1) {
+          mergedReceipts.unshift(receipt);
+          continue;
+        }
+
+        mergedReceipts[index] = receipt;
+      }
+
+      return mergedReceipts;
+    });
+  };
+
   const startReview = (newReceipts: Receipt[]) => {
     setReviewQueue(newReceipts);
     setSelectedReceipt(newReceipts[0] ?? null);
@@ -132,6 +150,7 @@ export function useReceipts(
     setFilterCategory,
     handleManualEntry,
     prependReceipts,
+    mergeReceipts,
     startReview,
     clearReview,
     dismissSelectedReviewReceipt,

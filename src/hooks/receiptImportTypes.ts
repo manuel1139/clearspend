@@ -7,6 +7,8 @@ export interface UseReceiptImportOptions {
   receipts: Receipt[];
   onError: Dispatch<SetStateAction<string | null>>;
   onImportedReceipts: (receipts: Receipt[]) => void;
+  onMergeReceipts: (receipts: Receipt[]) => void;
   onReviewReceipts: (receipts: Receipt[]) => void;
   onClearReview: () => void;
+  onRefreshKontoEntries: () => void | Promise<void>;
 }

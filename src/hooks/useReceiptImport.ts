@@ -8,8 +8,10 @@ export function useReceiptImport({
   receipts,
   onError,
   onImportedReceipts,
+  onMergeReceipts,
   onReviewReceipts,
   onClearReview,
+  onRefreshKontoEntries,
 }: UseReceiptImportOptions) {
   const { importSummary, setImportSummary } = useImportSummary();
   const handlers = useReceiptImportHandlers({
@@ -18,8 +20,10 @@ export function useReceiptImport({
     receipts,
     onError,
     onImportedReceipts,
+    onMergeReceipts,
     onReviewReceipts,
     onClearReview,
+    onRefreshKontoEntries,
     setImportSummary,
   });
 

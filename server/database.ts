@@ -1,5 +1,10 @@
 import sql from 'mssql';
-import type { PaymentRule, Receipt, ReceiptCategory } from '../shared/types.js';
+import type {
+  KontoEntry,
+  PaymentRule,
+  Receipt,
+  ReceiptCategory,
+} from '../shared/types.js';
 
 const DEFAULT_CATEGORIES = [
   'Essen',
@@ -38,6 +43,24 @@ function mapReceiptRecord(record: any): Receipt {
     createdAt: record.createdAt,
     imageUrl: record.imageUrl || undefined,
     box_2d: JSON.parse(record.box_2d || 'null') ?? undefined,
+    kontoEntryId: record.kontoEntryId || undefined,
+    kontoReference: record.kontoReference || undefined,
+  };
+}
+
+function mapKontoEntryRecord(record: any): KontoEntry {
+  return {
+    id: record.id,
+    bookingDate: record.bookingDate,
+    valueDate: record.valueDate || undefined,
+    amount: record.amount,
+    currency: record.currency,
+    counterpartyName: record.counterpartyName,
+    reference: record.reference,
+    endToEndId: record.endToEndId || undefined,
+    remittanceInfo: record.remittanceInfo || undefined,
+    sourceFileName: record.sourceFileName || undefined,
+    createdAt: record.createdAt,
   };
 }
 
@@ -94,6 +117,23 @@ async function ensureSchema(pool: sql.ConnectionPool) {
       )
     END
 
+    IF OBJECT_ID('dbo.KontoEntries', 'U') IS NULL
+    BEGIN
+      CREATE TABLE KontoEntries (
+        id NVARCHAR(80) PRIMARY KEY,
+        bookingDate NVARCHAR(50) NOT NULL,
+        valueDate NVARCHAR(50),
+        amount FLOAT NOT NULL,
+        currency NVARCHAR(10),
+        counterpartyName NVARCHAR(255),
+        reference NVARCHAR(MAX),
+        endToEndId NVARCHAR(255),
+        remittanceInfo NVARCHAR(MAX),
+        sourceFileName NVARCHAR(255),
+        createdAt NVARCHAR(50) NOT NULL
+      )
+    END
+
     IF NOT EXISTS (
       SELECT 1
       FROM sys.indexes
@@ -130,6 +170,16 @@ async function ensureSchema(pool: sql.ConnectionPool) {
     IF COL_LENGTH('dbo.Receipts', 'paymentRuleId') IS NULL
     BEGIN
       ALTER TABLE Receipts ADD paymentRuleId INT NULL
+    END
+
+    IF COL_LENGTH('dbo.Receipts', 'kontoEntryId') IS NULL
+    BEGIN
+      ALTER TABLE Receipts ADD kontoEntryId NVARCHAR(80) NULL
+    END
+
+    IF COL_LENGTH('dbo.Receipts', 'kontoReference') IS NULL
+    BEGIN
+      ALTER TABLE Receipts ADD kontoReference NVARCHAR(MAX) NULL
     END
 
     IF COL_LENGTH('dbo.Receipts', 'category') IS NOT NULL
@@ -199,6 +249,17 @@ async function ensureSchema(pool: sql.ConnectionPool) {
       FOREIGN KEY (paymentRuleId) REFERENCES PaymentRules(id)
     END
 
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.foreign_keys
+      WHERE name = 'FK_Receipts_KontoEntries'
+    )
+    BEGIN
+      ALTER TABLE Receipts WITH NOCHECK
+      ADD CONSTRAINT FK_Receipts_KontoEntries
+      FOREIGN KEY (kontoEntryId) REFERENCES KontoEntries(id)
+    END
+
     IF EXISTS (
       SELECT 1
       FROM sys.columns
@@ -263,6 +324,114 @@ export async function listReceiptCategories(pool: sql.ConnectionPool) {
     .request()
     .query('SELECT id, name FROM Categories ORDER BY name ASC');
   return result.recordset as ReceiptCategory[];
+}
+
+export async function listKontoEntries(pool: sql.ConnectionPool) {
+  const result = await pool.request().query(`
+    SELECT
+      id,
+      bookingDate,
+      valueDate,
+      amount,
+      currency,
+      counterpartyName,
+      reference,
+      endToEndId,
+      remittanceInfo,
+      sourceFileName,
+      createdAt
+    FROM KontoEntries
+    ORDER BY bookingDate DESC, createdAt DESC
+  `);
+
+  return result.recordset.map(mapKontoEntryRecord);
+}
+
+export async function saveKontoEntries(
+  pool: sql.ConnectionPool,
+  entries: KontoEntry[],
+) {
+  const savedEntries: KontoEntry[] = [];
+
+  for (const entry of entries) {
+    const result = await pool
+      .request()
+      .input('id', sql.NVarChar, entry.id)
+      .input('bookingDate', sql.NVarChar, entry.bookingDate)
+      .input('valueDate', sql.NVarChar, entry.valueDate || '')
+      .input('amount', sql.Float, entry.amount)
+      .input('currency', sql.NVarChar, entry.currency)
+      .input('counterpartyName', sql.NVarChar, entry.counterpartyName)
+      .input('reference', sql.NVarChar, entry.reference)
+      .input('endToEndId', sql.NVarChar, entry.endToEndId || '')
+      .input('remittanceInfo', sql.NVarChar, entry.remittanceInfo || '')
+      .input('sourceFileName', sql.NVarChar, entry.sourceFileName || '')
+      .input('createdAt', sql.NVarChar, entry.createdAt).query(`
+        IF EXISTS (SELECT 1 FROM KontoEntries WHERE id = @id)
+        BEGIN
+          UPDATE KontoEntries
+          SET
+            bookingDate = @bookingDate,
+            valueDate = @valueDate,
+            amount = @amount,
+            currency = @currency,
+            counterpartyName = @counterpartyName,
+            reference = @reference,
+            endToEndId = @endToEndId,
+            remittanceInfo = @remittanceInfo,
+            sourceFileName = @sourceFileName
+          WHERE id = @id
+        END
+        ELSE
+        BEGIN
+          INSERT INTO KontoEntries (
+            id,
+            bookingDate,
+            valueDate,
+            amount,
+            currency,
+            counterpartyName,
+            reference,
+            endToEndId,
+            remittanceInfo,
+            sourceFileName,
+            createdAt
+          )
+          VALUES (
+            @id,
+            @bookingDate,
+            @valueDate,
+            @amount,
+            @currency,
+            @counterpartyName,
+            @reference,
+            @endToEndId,
+            @remittanceInfo,
+            @sourceFileName,
+            @createdAt
+          )
+        END
+
+        SELECT
+          id,
+          bookingDate,
+          valueDate,
+          amount,
+          currency,
+          counterpartyName,
+          reference,
+          endToEndId,
+          remittanceInfo,
+          sourceFileName,
+          createdAt
+        FROM KontoEntries
+        WHERE id = @id
+      `);
+
+    savedEntries.push(mapKontoEntryRecord(result.recordset[0]));
+  }
+
+  return savedEntries;
 }
 
 export async function listPaymentRules(pool: sql.ConnectionPool) {
@@ -353,7 +522,9 @@ export async function listReceipts(pool: sql.ConnectionPool) {
       Receipts.items,
       Receipts.createdAt,
       Receipts.imageUrl,
-      Receipts.box_2d
+      Receipts.box_2d,
+      Receipts.kontoEntryId,
+      Receipts.kontoReference
     FROM Receipts
     INNER JOIN Categories ON Categories.id = Receipts.categoryId
     INNER JOIN PaymentRules ON PaymentRules.id = Receipts.paymentRuleId
@@ -380,7 +551,9 @@ export async function getReceiptById(pool: sql.ConnectionPool, id: string) {
       Receipts.items,
       Receipts.createdAt,
       Receipts.imageUrl,
-      Receipts.box_2d
+      Receipts.box_2d,
+      Receipts.kontoEntryId,
+      Receipts.kontoReference
     FROM Receipts
     INNER JOIN Categories ON Categories.id = Receipts.categoryId
     INNER JOIN PaymentRules ON PaymentRules.id = Receipts.paymentRuleId
@@ -408,6 +581,8 @@ export async function saveReceipt(pool: sql.ConnectionPool, receipt: Receipt) {
       .input('items', sql.NVarChar, JSON.stringify(receipt.items || []))
       .input('imageUrl', sql.NVarChar, receipt.imageUrl || '')
       .input('box_2d', sql.NVarChar, JSON.stringify(receipt.box_2d || null))
+      .input('kontoEntryId', sql.NVarChar, receipt.kontoEntryId || '')
+      .input('kontoReference', sql.NVarChar, receipt.kontoReference || '')
       .query(`
         UPDATE Receipts SET 
           merchant = @merchant,
@@ -419,7 +594,9 @@ export async function saveReceipt(pool: sql.ConnectionPool, receipt: Receipt) {
           tags = @tags,
           items = @items,
           imageUrl = @imageUrl,
-          box_2d = @box_2d
+          box_2d = @box_2d,
+          kontoEntryId = NULLIF(@kontoEntryId, ''),
+          kontoReference = NULLIF(@kontoReference, '')
         WHERE id = @id
       `);
 
@@ -445,6 +622,8 @@ export async function saveReceipt(pool: sql.ConnectionPool, receipt: Receipt) {
     .input('createdAt', sql.NVarChar, receipt.createdAt)
     .input('imageUrl', sql.NVarChar, receipt.imageUrl || '')
     .input('box_2d', sql.NVarChar, JSON.stringify(receipt.box_2d || null))
+    .input('kontoEntryId', sql.NVarChar, receipt.kontoEntryId || '')
+    .input('kontoReference', sql.NVarChar, receipt.kontoReference || '')
     .query(`
       INSERT INTO Receipts (
         id,
@@ -458,7 +637,9 @@ export async function saveReceipt(pool: sql.ConnectionPool, receipt: Receipt) {
         items,
         createdAt,
         imageUrl,
-        box_2d
+        box_2d,
+        kontoEntryId,
+        kontoReference
       )
       VALUES (
         @id,
@@ -472,7 +653,9 @@ export async function saveReceipt(pool: sql.ConnectionPool, receipt: Receipt) {
         @items,
         @createdAt,
         @imageUrl,
-        @box_2d
+        @box_2d,
+        NULLIF(@kontoEntryId, ''),
+        NULLIF(@kontoReference, '')
       )
     `);
 

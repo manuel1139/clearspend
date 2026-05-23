@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { findRefundedAmazonOrderIds } from '../lib/amazonImport';
+import {
+  importKontoZipRequest,
+  saveKontoEntriesRequest,
+} from '../lib/api/kontoEntries';
 import { saveReceiptRequest } from '../lib/api/receipts';
+import { isGeminiConfigured } from '../lib/gemini';
 import { parseAmazonCsvText, parseOrderText, scanReceipt } from '../lib/gemini';
+import { matchKontoEntriesToReceipts } from '../lib/kontoImport';
 import {
   createReceiptFromParsedOrder,
   createReceiptFromScanResult,
@@ -28,9 +34,25 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const [, base64 = ''] = result.split(',');
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 interface UseReceiptImportHandlersOptions extends UseReceiptImportOptions {
   setImportSummary: (summary: ImportSummary | null) => void;
 }
+
+type ImportPhase = 'idle' | 'preparing' | 'calling-gemini' | 'saving' | 'done' | 'failed';
+type ImportKind = 'receipt-image' | 'amazon-text' | 'amazon-csv' | 'konto-zip' | null;
 
 function getOrderTag(receipt: Receipt) {
   return receipt.tags.find((tag) => tag.startsWith('Order: ')) ?? null;
@@ -86,14 +108,29 @@ export function useReceiptImportHandlers({
   receipts,
   onError,
   onImportedReceipts,
+  onMergeReceipts,
   onReviewReceipts,
   onClearReview,
+  onRefreshKontoEntries,
   setImportSummary,
 }: UseReceiptImportHandlersOptions) {
   const [isScanning, setIsScanning] = useState(false);
   const [isPasting, setIsPasting] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+  const [lastImportKind, setLastImportKind] = useState<ImportKind>(null);
+  const [lastImportPhase, setLastImportPhase] = useState<ImportPhase>('idle');
+  const [lastImportMessage, setLastImportMessage] = useState('No import started yet.');
+
+  const updateImportStatus = (
+    kind: ImportKind,
+    phase: ImportPhase,
+    message: string,
+  ) => {
+    setLastImportKind(kind);
+    setLastImportPhase(phase);
+    setLastImportMessage(message);
+  };
 
   const handlePasteSubmit = async () => {
     if (!pastedText.trim()) return;
@@ -108,14 +145,17 @@ export function useReceiptImportHandlers({
     setIsScanning(true);
     setIsPasting(false);
     onError(null);
+    updateImportStatus('amazon-text', 'preparing', 'Preparing Amazon text for Gemini.');
 
     try {
+      updateImportStatus('amazon-text', 'calling-gemini', 'Calling Gemini for Amazon text extraction.');
       const results = await parseOrderText(
         pastedText,
         categories.map((category) => category.name),
       );
       const savedReceipts: Receipt[] = [];
 
+      updateImportStatus('amazon-text', 'saving', 'Saving extracted Amazon text receipts.');
       for (let index = 0; index < results.length; index++) {
         const saved = await saveReceiptRequest(
           createReceiptFromParsedOrder(
@@ -132,10 +172,17 @@ export function useReceiptImportHandlers({
         onImportedReceipts(savedReceipts);
         setImportSummary({ imported: savedReceipts.length, skipped: 0 });
         setPastedText('');
+        updateImportStatus('amazon-text', 'done', `Gemini returned ${savedReceipts.length} receipt(s).`);
       } else {
         onError('Keine Bestelldaten im Text erkannt.');
+        updateImportStatus('amazon-text', 'failed', 'Gemini returned no usable Amazon text receipts.');
       }
     } catch (error) {
+      updateImportStatus(
+        'amazon-text',
+        'failed',
+        error instanceof Error ? error.message : 'Amazon text import failed.',
+      );
       onError(
         'Fehler beim Verarbeiten des Textes.' +
           (error instanceof Error ? ` ${error.message}` : ''),
@@ -157,10 +204,12 @@ export function useReceiptImportHandlers({
     setIsScanning(true);
     onError(null);
     onClearReview();
+    updateImportStatus('receipt-image', 'preparing', 'Preparing receipt image for Gemini.');
 
     try {
       const imageUrl = await readFileAsDataUrl(file);
       const base64 = imageUrl.split(',')[1];
+      updateImportStatus('receipt-image', 'calling-gemini', 'Calling Gemini for receipt image analysis.');
       const results = await scanReceipt(
         base64,
         file.type,
@@ -178,11 +227,18 @@ export function useReceiptImportHandlers({
 
       if (newReceipts.length > 0) {
         onReviewReceipts(newReceipts);
+        updateImportStatus('receipt-image', 'done', `Gemini found ${newReceipts.length} receipt(s) in the image.`);
       } else {
         onError('Keine Belege im Bild erkannt.');
+        updateImportStatus('receipt-image', 'failed', 'Gemini found no usable receipts in the image.');
       }
     } catch (error) {
       console.error('Scan error:', error);
+      updateImportStatus(
+        'receipt-image',
+        'failed',
+        error instanceof Error ? error.message : 'Receipt image analysis failed.',
+      );
       onError(
         error instanceof Error && error.message === 'Datei konnte nicht gelesen werden.'
           ? error.message
@@ -207,6 +263,7 @@ export function useReceiptImportHandlers({
 
     setIsScanning(true);
     onError(null);
+    updateImportStatus('amazon-csv', 'preparing', 'Preparing Amazon CSV for import.');
 
     try {
       const text = await readFileAsText(file);
@@ -221,27 +278,26 @@ export function useReceiptImportHandlers({
         throw new Error('No payment rules are configured.');
       }
 
+      updateImportStatus('amazon-csv', 'calling-gemini', 'Calling Gemini for Amazon CSV extraction.');
       const parsedOrders = await parseAmazonCsvText(
         text,
         categories.map((category) => category.name),
       );
       const refundedOrderIds = findRefundedAmazonOrderIds(text);
-      const createdReceipts = parsedOrders
-        .map((result, index) =>
-          createReceiptFromParsedOrder(
-            result,
-            index,
-            categories,
-            defaultPaymentRule,
-          ),
-        );
+      const createdReceipts = parsedOrders.map((result, index) =>
+        createReceiptFromParsedOrder(
+          result,
+          index,
+          categories,
+          defaultPaymentRule,
+        ),
+      );
       const refundedFilteredReceipts = createdReceipts.filter((receipt) => {
-          const orderTag = getOrderTag(receipt);
-          const orderId = orderTag?.replace('Order: ', '') ?? '';
-          return orderId ? !refundedOrderIds.has(orderId) : true;
-        });
-      const parsedReceipts = refundedFilteredReceipts
-        .map(dedupeAmazonReceiptItems);
+        const orderTag = getOrderTag(receipt);
+        const orderId = orderTag?.replace('Order: ', '') ?? '';
+        return orderId ? !refundedOrderIds.has(orderId) : true;
+      });
+      const parsedReceipts = refundedFilteredReceipts.map(dedupeAmazonReceiptItems);
       const seenOrderTags = new Set<string>();
       const importableReceipts = parsedReceipts.filter((receipt) => {
         const orderTag = getOrderTag(receipt);
@@ -258,6 +314,7 @@ export function useReceiptImportHandlers({
       });
       const savedReceipts: Receipt[] = [];
 
+      updateImportStatus('amazon-csv', 'saving', 'Saving imported Amazon CSV receipts.');
       for (const receipt of importableReceipts) {
         try {
           savedReceipts.push(await saveReceiptRequest(receipt));
@@ -266,8 +323,7 @@ export function useReceiptImportHandlers({
         }
       }
 
-      const skippedCount =
-        createdReceipts.length - importableReceipts.length;
+      const skippedCount = createdReceipts.length - importableReceipts.length;
 
       if (savedReceipts.length > 0 || skippedCount > 0) {
         onImportedReceipts(savedReceipts);
@@ -275,14 +331,94 @@ export function useReceiptImportHandlers({
           imported: savedReceipts.length,
           skipped: skippedCount,
         });
+        updateImportStatus(
+          'amazon-csv',
+          'done',
+          `Gemini returned ${createdReceipts.length} order(s); imported ${savedReceipts.length}, skipped ${skippedCount}.`,
+        );
       } else {
         onError('Keine gültigen Bestelldaten in der CSV-Datei gefunden.');
+        updateImportStatus('amazon-csv', 'failed', 'Gemini returned no usable Amazon CSV orders.');
       }
     } catch (error) {
+      updateImportStatus(
+        'amazon-csv',
+        'failed',
+        error instanceof Error ? error.message : 'Amazon CSV import failed.',
+      );
       onError(
         error instanceof Error
           ? error.message
           : 'Die CSV-Datei konnte nicht verarbeitet werden.',
+      );
+    } finally {
+      setIsScanning(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleKontoZipUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    onError(null);
+    updateImportStatus('konto-zip', 'preparing', 'Preparing CAMT ZIP import.');
+
+    try {
+      const base64 = await readFileAsBase64(file);
+      const parsedKontoImport = await importKontoZipRequest(file.name, base64);
+      const parsedEntries = parsedKontoImport.entries;
+      const detectedFormatsLabel =
+        parsedKontoImport.detectedFormats.length > 0
+          ? parsedKontoImport.detectedFormats.join(', ')
+          : 'no CAMT format detected';
+      if (parsedEntries.length === 0) {
+        onError(
+          `Keine Konto-Buchungen in der ZIP-Datei gefunden. Format: ${detectedFormatsLabel}.`,
+        );
+        updateImportStatus(
+          'konto-zip',
+          'failed',
+          `No usable Konto entries found. Detected: ${detectedFormatsLabel}.`,
+        );
+        return;
+      }
+
+      updateImportStatus('konto-zip', 'saving', 'Saving Konto entries and linking matching receipts.');
+      const savedEntries = await saveKontoEntriesRequest(parsedEntries);
+      const matchedReceipts = matchKontoEntriesToReceipts(savedEntries, receipts);
+      const savedMatchedReceipts: Receipt[] = [];
+
+      for (const receipt of matchedReceipts) {
+        savedMatchedReceipts.push(await saveReceiptRequest(receipt));
+      }
+
+      if (savedMatchedReceipts.length > 0) {
+        onMergeReceipts(savedMatchedReceipts);
+      }
+
+      await onRefreshKontoEntries();
+
+      setImportSummary({
+        imported: savedEntries.length,
+        skipped: parsedEntries.length - savedEntries.length,
+      });
+      updateImportStatus(
+        'konto-zip',
+        'done',
+        `Detected ${detectedFormatsLabel}; imported ${savedEntries.length} Konto entries and linked ${savedMatchedReceipts.length} receipt(s).`,
+      );
+    } catch (error) {
+      updateImportStatus(
+        'konto-zip',
+        'failed',
+        error instanceof Error ? error.message : 'Konto ZIP import failed.',
+      );
+      onError(
+        error instanceof Error
+          ? error.message
+          : 'Die Konto-ZIP-Datei konnte nicht verarbeitet werden.',
       );
     } finally {
       setIsScanning(false);
@@ -319,9 +455,14 @@ export function useReceiptImportHandlers({
     pastedText,
     setPastedText,
     isDragging,
+    geminiConfigured: isGeminiConfigured(),
+    lastImportKind,
+    lastImportPhase,
+    lastImportMessage,
     handlePasteSubmit,
     handleFileUpload,
     handleCsvUpload,
+    handleKontoZipUpload,
     handleDragOver,
     handleDragLeave,
     handleDrop,

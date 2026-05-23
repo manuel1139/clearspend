@@ -32,6 +32,8 @@ export interface Receipt {
   createdAt: string;
   imageUrl?: string;
   box_2d?: [number, number, number, number];
+  kontoEntryId?: string;
+  kontoReference?: string;
 }
 
 export interface ScannedReceipt {
@@ -48,4 +50,18 @@ export interface ScannedReceipt {
 export interface ImportSummary {
   imported: number;
   skipped: number;
+}
+
+export interface KontoEntry {
+  id: string;
+  bookingDate: string;
+  valueDate?: string;
+  amount: number;
+  currency: string;
+  counterpartyName: string;
+  reference: string;
+  endToEndId?: string;
+  remittanceInfo?: string;
+  sourceFileName?: string;
+  createdAt: string;
 }
