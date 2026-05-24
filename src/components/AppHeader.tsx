@@ -1,70 +1,105 @@
-import { Camera, FileText, Plus, Receipt as ReceiptIcon } from 'lucide-react';
-import type { ChangeEvent, RefObject } from 'react';
+import React from 'react';
+// Removed duplicate React import
+import { ArrowLeft, Bug, Cog, Landmark, Repeat, SquarePen, TrendingUp } from 'lucide-react';
+import { DateRangePreset } from '../lib/dashboard';
 
 interface AppHeaderProps {
-  fileInputRef: RefObject<HTMLInputElement | null>;
-  csvInputRef: RefObject<HTMLInputElement | null>;
-  onManualEntry: () => void;
-  onFileUpload: (event: ChangeEvent<HTMLInputElement>) => void;
-  onCsvUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  activeScreen: string;
+  historyRange: DateRangePreset;
+  setHistoryRange: (range: DateRangePreset) => void;
+  customRangeStart: string;
+  setCustomRangeStart: (val: string) => void;
+  customRangeEnd: string;
+  setCustomRangeEnd: (val: string) => void;
+  onNavigate: (screen: 'dashboard' | 'intake' | 'config' | 'konto' | 'debug' | 'forecast' | 'recurring') => void; // Explicitly typed
+  RangeSelect: React.ComponentType<{ value: DateRangePreset; onChange: (v: DateRangePreset) => void }>; // Explicitly typed
 }
 
 export function AppHeader({
-  fileInputRef,
-  csvInputRef,
-  onManualEntry,
-  onFileUpload,
-  onCsvUpload,
+  activeScreen,
+  historyRange,
+  setHistoryRange,
+  customRangeStart,
+  setCustomRangeStart,
+  customRangeEnd,
+  setCustomRangeEnd,
+  onNavigate,
+  RangeSelect,
 }: AppHeaderProps) {
+  const isNestedScreen = ['intake', 'konto', 'debug', 'forecast', 'recurring'].includes(activeScreen);
+
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white/80 px-6 py-4 backdrop-blur-md">
-      <div className="flex items-center gap-2">
-        <div className="rounded-xl bg-[#1A1A1A] p-2">
-          <ReceiptIcon className="h-6 w-6 text-white" />
+    <div className="mb-5 space-y-4">
+      <div className="flex items-center justify-start gap-2">
+        {isNestedScreen ? (
+          <button
+            onClick={() => onNavigate('dashboard')}
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-lg"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        ) : (
+          <>
+            <NavButton onClick={() => onNavigate('konto')} icon={<Landmark size={18} />} />
+            <NavButton onClick={() => onNavigate('recurring')} icon={<Repeat size={18} />} />
+            <NavButton onClick={() => onNavigate('forecast')} icon={<TrendingUp size={18} />} />
+            <NavButton onClick={() => onNavigate('debug')} icon={<Bug size={18} />} />
+            <NavButton onClick={() => onNavigate('intake')} icon={<SquarePen size={18} />} />
+            <NavButton onClick={() => onNavigate('config')} icon={<Cog size={18} />} />
+          </>
+        )}
+      </div>
+
+      {activeScreen !== 'dashboard' && (
+        <h1 className="mt-2 text-[2rem] font-semibold tracking-tight text-slate-950">
+          {activeScreen === 'intake'
+            ? 'Data Entry'
+            : activeScreen === 'konto'
+              ? 'Banking'
+              : activeScreen === 'debug'
+                ? 'Debug'
+                : activeScreen === 'forecast'
+                  ? 'Forecast'
+                  : activeScreen === 'recurring'
+                    ? 'Recurring'
+                    : 'Configuration'}
+        </h1>
+      )}
+
+      {activeScreen === 'dashboard' && (
+        <div className="space-y-3">
+          <div className="flex justify-start">
+            <RangeSelect value={historyRange} onChange={setHistoryRange} />
+          </div>
+          {historyRange === 'custom' && (
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="date"
+                value={customRangeStart}
+                onChange={(e) => setCustomRangeStart(e.target.value)}
+                className="rounded-full bg-white/14 px-4 py-2 text-xs font-medium text-slate-950 outline-none ring-1 ring-white/20"
+              />
+              <input
+                type="date"
+                value={customRangeEnd}
+                onChange={(e) => setCustomRangeEnd(e.target.value)}
+                className="rounded-full bg-white/14 px-4 py-2 text-xs font-medium text-slate-950 outline-none ring-1 ring-white/20"
+              />
+            </div>
+          )}
         </div>
-        <h1 className="text-xl font-bold tracking-tight">ClearSpend</h1>
-      </div>
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => csvInputRef.current?.click()}
-          className="flex items-center gap-2 rounded-full bg-gray-100 px-4 py-2 font-mono text-sm font-medium text-gray-700 transition-all hover:bg-gray-200"
-        >
-          <FileText size={16} />
-          <span className="hidden sm:inline">Upload CSV</span>
-          <span className="sm:hidden">CSV</span>
-        </button>
-        <button
-          onClick={onManualEntry}
-          className="flex items-center gap-2 rounded-full bg-gray-100 px-4 py-2 font-mono text-sm font-medium text-gray-700 transition-all hover:bg-gray-200"
-        >
-          <Plus size={16} />
-          <span className="hidden sm:inline">Manuelle Eingabe</span>
-          <span className="sm:hidden">Neu</span>
-        </button>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 rounded-full bg-[#1A1A1A] px-4 py-2 font-medium text-white shadow-lg shadow-black/10 transition-all hover:bg-black"
-          id="scan-button"
-        >
-          <Camera size={18} />
-          <span className="hidden sm:inline">Neuer Scan</span>
-          <span className="sm:hidden">Scan</span>
-        </button>
-      </div>
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={onFileUpload}
-        accept="image/*"
-        className="hidden"
-      />
-      <input
-        type="file"
-        ref={csvInputRef}
-        onChange={onCsvUpload}
-        accept=".csv"
-        className="hidden"
-      />
-    </header>
+      )}
+    </div>
+  );
+}
+
+function NavButton({ onClick, icon }: { onClick: () => void; icon: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex h-11 w-11 items-center justify-center rounded-full bg-white/16 text-white shadow-lg"
+    >
+      {icon}
+    </button>
   );
 }
