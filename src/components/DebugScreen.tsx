@@ -5,7 +5,8 @@ interface DebugScreenProps {
   kontoEntries: { entries: KontoEntry[] };
   receipts: { receipts: Receipt[] };
   geminiApiKey: string | null;
-  detectedEnvKeys: string[];  aiHistory: { action: string; prompt: string; response: string; timestamp: string }[];
+  detectedEnvKeys: string[];
+  aiHistory: { action: string; prompt: string; response: string; timestamp: string }[];
 }
 
 export function DebugScreen({ kontoEntries, receipts, geminiApiKey, detectedEnvKeys, aiHistory }: DebugScreenProps) {

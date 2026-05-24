@@ -21,6 +21,16 @@ import { parseCamtZipBase64 } from './kontoImport.js';
 
 let aiHistory: { action: string; prompt: string; response: string; timestamp: string }[] = [];
 
+function addToHistory(action: string, prompt: string, response: string) {
+  aiHistory.push({
+    action,
+    prompt,
+    response,
+    timestamp: new Date().toISOString()
+  });
+  if (aiHistory.length > 20) aiHistory.shift();
+}
+
 export async function createApp(connectionString: string) {
   const app = express();
   const pool = await initializeDatabase(connectionString);
@@ -110,13 +120,7 @@ export async function createApp(connectionString: string) {
       const rawResponse = response.response.text();
       console.log(`[Gemini Response - ${action}]`, rawResponse);
 
-      aiHistory.push({
-        action,
-        prompt: promptText,
-        response: rawResponse,
-        timestamp: new Date().toISOString()
-      });
-      if (aiHistory.length > 20) aiHistory.shift();
+      addToHistory(action, promptText, rawResponse);
 
       try {
         res.json(JSON.parse(rawResponse));
@@ -194,6 +198,8 @@ export async function createApp(connectionString: string) {
           const result = await model.generateContent(aiPrompt);
           const responseText = result.response.text().replace(/```json|```/g, '').trim();
           const { results } = JSON.parse(responseText) as { results: { id: string; category: string }[] };
+
+          addToHistory('auto-categorize-zip', aiPrompt, responseText);
 
           for (const res of results) {
             const matchedCat = categories.find(c => c.name === res.category);
@@ -298,6 +304,8 @@ export async function createApp(connectionString: string) {
       const aiResult = await model.generateContent(prompt);
       const responseText = aiResult.response.text().replace(/```json|```/g, '').trim();
       const { results } = JSON.parse(responseText) as { results: { id: string; category: string }[] };
+
+      addToHistory('fix-sonstiges-ai', prompt, responseText);
 
       for (const resItem of results) {
         const matchedCat = categories.find(c => c.name === resItem.category);
