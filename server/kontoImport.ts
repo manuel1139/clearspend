@@ -26,10 +26,10 @@ interface CamtParty {
       OrgId?: { AnyBIC?: string; Othr?: { Id?: string } };
       PrvtId?: { Othr?: { Id?: string } };
       Id?: string;
-      [key: string]: any;
+      [key: string]: unknown;
     };
   };
-  Id?: any;
+  Id?: string | Record<string, unknown>;
 }
 
 interface CamtRelatedParties {
@@ -68,8 +68,10 @@ interface CamtEntry {
   CdtDbtInd?: string;
   AddtlNtryInf?: string;
   NtryRef?: string;
+  RltdPties?: CamtRelatedParties;
   NtryDtls?: {
     TxDtls?: CamtTransactionDetail | CamtTransactionDetail[];
+    RltdPties?: CamtRelatedParties;
   };
 }
 
@@ -179,10 +181,16 @@ function extractPartyId(party: CamtParty | undefined): string {
 
   if (typeof idObj === 'string') return idObj;
 
-  if (idObj.OrgId?.AnyBIC) return safeString(idObj.OrgId.AnyBIC);
-  if (idObj.OrgId?.Othr?.Id) return safeString(idObj.OrgId.Othr.Id);
-  if (idObj.PrvtId?.Othr?.Id) return safeString(idObj.PrvtId.Othr.Id);
-  if (idObj.Id) return safeString(idObj.Id);
+  const obj = idObj as {
+    OrgId?: { AnyBIC?: string; Othr?: { Id?: string } };
+    PrvtId?: { Othr?: { Id?: string } };
+    Id?: string;
+  };
+
+  if (obj.OrgId?.AnyBIC) return safeString(obj.OrgId.AnyBIC);
+  if (obj.OrgId?.Othr?.Id) return safeString(obj.OrgId.Othr.Id);
+  if (obj.PrvtId?.Othr?.Id) return safeString(obj.PrvtId.Othr.Id);
+  if (typeof obj.Id === 'string') return safeString(obj.Id);
 
   return '';
 }
@@ -276,7 +284,7 @@ function parseTransactionDetails(
       return [];
     }
 
-    const entryRltdPties = (e as any).RltdPties || (e as any).NtryDtls?.RltdPties;
+    const entryRltdPties = e.RltdPties || e.NtryDtls?.RltdPties;
 
     const cdtr = entryRltdPties?.Cdtr;
     const dbtr = entryRltdPties?.Dbtr;
@@ -335,7 +343,7 @@ function parseTransactionDetails(
         return null;
       }
 
-      const entryRltdPties = (e as any).RltdPties || (e as any).NtryDtls?.RltdPties;
+      const entryRltdPties = e.RltdPties || e.NtryDtls?.RltdPties;
       const cdtr = detail.RltdPties?.Cdtr || entryRltdPties?.Cdtr;
       const dbtr = detail.RltdPties?.Dbtr || entryRltdPties?.Dbtr;
       const ultmtCdtr = detail.RltdPties?.UltmtCdtr || entryRltdPties?.UltmtCdtr;

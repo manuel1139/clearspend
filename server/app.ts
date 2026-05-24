@@ -19,7 +19,9 @@ import { buildReceiptListSchema } from './geminiSchema.js';
 import { parseAmazonOrdersCsv } from './amazonImport.js';
 import { parseCamtZipBase64 } from './kontoImport.js';
 
-let aiHistory: { action: string; prompt: string; response: string; timestamp: string }[] = [];
+const aiHistory: { action: string; prompt: string; response: string; timestamp: string }[] = [];
+
+const gemini_model = 'gemini-2.0-flash';
 
 function addToHistory(action: string, prompt: string, response: string) {
   aiHistory.push({
@@ -60,17 +62,17 @@ export async function createApp(connectionString: string) {
       categoryNames?: string[]; 
       text?: string 
     };
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = ai.getGenerativeModel({ model: gemini_model });
 
     let contents: Content[];
-    let promptText = '';
+    let promptText: string;
 
     if (action === 'scan') {
       if (!base64Image || !mimeType) {
         return res.status(400).json({ error: 'Image data and MIME type are required for scanning.' });
       }
 
-      const prompt = `Analysiere dieses Bild. Es kann einen oder mehrere Belege enthalten.
+      promptText = `Analysiere dieses Bild. Es kann einen oder mehrere Belege enthalten.
       Lies das Kaufdatum/Rechnungsdatum direkt vom Beleg aus und gib es als YYYY-MM-DD zurueck.
       Wenn mehrere Daten sichtbar sind, verwende das Datum der Transaktion/des Einkaufs, nicht das Druckdatum, Upload-Datum oder heutige Datum.
       Wenn nur ein deutsches Datum wie 12.05.2026 sichtbar ist, normalisiere es zu 2026-05-12.
@@ -79,17 +81,15 @@ export async function createApp(connectionString: string) {
       Gib den Begrenzungsrahmen ([ymin, xmin, ymax, xmax]) fuer jeden erkannten Beleg an.
       Sei so genau wie moeglich. Wenn ein Wert fehlt, gib eine plausible Schaetzung ab oder lasse ihn null.
       Kategorisiere jede Ausgabe in eine der folgenden Kategorien: ${(categoryNames || []).join(', ') || 'Sonstiges'}.`;
-      promptText = prompt;
-      contents = [{ role: 'user', parts: [{ text: prompt }, { inlineData: { data: base64Image, mimeType } }] }];
+      contents = [{ role: 'user', parts: [{ text: promptText }, { inlineData: { data: base64Image, mimeType } }] }];
     } else if (action === 'parse-text') {
-      const prompt = `Analysiere diesen Text, der eine oder mehrere Bestellungen oder Quittungsinformationen enthaelt.
+      promptText = `Analysiere diesen Text, der eine oder mehrere Bestellungen oder Quittungsinformationen enthaelt.
       Extrahiere alle Details wie Haendler, Datum (YYYY-MM-DD), Gesamtbetrag, Waehrung und einzelne Posten.
       Suche bei den Posten auch nach Bild-URLs, falls diese im Text enthalten sind.
       Kategorisiere die Ausgabe in: ${(categoryNames || []).join(', ') || 'Sonstiges'}.`;
-      promptText = prompt;
-      contents = [{ role: 'user', parts: [{ text: prompt }, { text: text || '' }] }];
+      contents = [{ role: 'user', parts: [{ text: promptText }, { text: text || '' }] }];
     } else if (action === 'parse-csv') {
-      const prompt = `Analysiere diese Amazon-Bestellhistorie im CSV-Format.
+      promptText = `Analysiere diese Amazon-Bestellhistorie im CSV-Format.
       Die Daten koennen mehrere Zeilen pro Bestellung enthalten.
       Gruppiere Zeilen mit derselben Order ID zu genau einer Bestellung.
       Ignoriere stornierte Bestellungen.
@@ -102,8 +102,7 @@ export async function createApp(connectionString: string) {
       Kategorisiere jede Bestellung in eine der folgenden Kategorien: ${(categoryNames || []).join(', ') || 'Sonstiges'}.
       Fuege im Feld tags immer "Amazon CSV" hinzu.
       Wenn eine Order ID vorhanden ist, fuege zusaetzlich einen Tag im Format "Order: <id>" hinzu.`;
-      promptText = prompt;
-      contents = [{ role: 'user', parts: [{ text: prompt }, { text: text || '' }] }];
+      contents = [{ role: 'user', parts: [{ text: promptText }, { text: text || '' }] }];
     } else {
       return res.status(400).json({ error: 'Invalid action' });
     }
@@ -130,7 +129,8 @@ export async function createApp(connectionString: string) {
       }
     } catch (error: unknown) {
       console.error('Gemini error:', error);
-      res.status(500).json({ error: 'Failed to process request' });
+      const message = error instanceof Error ? error.message : 'Failed to process request';
+      res.status(500).json({ error: message });
     }
   });
 
@@ -147,7 +147,7 @@ export async function createApp(connectionString: string) {
 
   app.post('/api/imports/amazon-csv', async (req, res) => {
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-    const { csvText } = req.body;
+    const { csvText } = req.body as { csvText: string };
 
     try {
       const [categories, paymentRules, existingReceipts] = await Promise.all([
@@ -173,7 +173,7 @@ export async function createApp(connectionString: string) {
 
   app.post('/api/imports/konto-zip', async (req, res) => {
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-    const { fileName, base64 } = req.body;
+    const { fileName, base64 } = req.body as { fileName: string; base64: string };
 
     try {
       // 1. Parse ZIP and XML via the existing service
@@ -187,7 +187,7 @@ export async function createApp(connectionString: string) {
       if (ai && uncategorized.length > 0) {
         const categories = await listReceiptCategories(pool);
         const categoryNames = categories.map(c => c.name);
-        const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = ai.getGenerativeModel({ model: gemini_model });
 
         const prompt = `Kategorisiere diese Banktransaktionen in folgende Kategorien: ${categoryNames.join(', ')}.
         Partner: {counterpartyName}, Referenz: {reference}.
@@ -261,7 +261,7 @@ export async function createApp(connectionString: string) {
   app.patch('/api/konto/:id/category', async (req, res) => {
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
     const { id } = req.params;
-    const { categoryId } = req.body;
+    const { categoryId } = req.body as { categoryId: number };
 
     try {
       await updateKontoEntryCategory(pool, id, categoryId);
@@ -294,7 +294,7 @@ export async function createApp(connectionString: string) {
       }
 
       const categoryNames = categories.map(c => c.name).filter(n => n !== 'Sonstiges');
-      const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const model = ai.getGenerativeModel({ model: gemini_model });
 
       const prompt = `Kategorisiere diese Banktransaktionen in folgende Kategorien: ${categoryNames.join(', ')}. Partner: {counterpartyName}, Referenz: {reference}. Antworte NUR mit einem JSON-Objekt: { "results": [{ "id": "...", "category": "Kategoriename" }] }
       

@@ -10,6 +10,26 @@ import {
 import type { ImportSummary, Receipt, ReceiptItem } from '../types';
 import type { UseReceiptImportOptions } from './receiptImportTypes';
 
+interface RawGeminiReceipt {
+  merchant: string;
+  date: string;
+  total: number;
+  currency: string;
+  category: string;
+  items?: Array<{
+    name: string;
+    price: number;
+    quantity: number;
+    imageUrl?: string;
+  }>;
+  tags?: string[];
+  box_2d?: number[];
+}
+
+interface GeminiResponse {
+  receipts: RawGeminiReceipt[];
+}
+
 function readFileAsText(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -153,21 +173,23 @@ export function useReceiptImportHandlers({
 
     try {
       updateImportStatus('amazon-text', 'calling-gemini', 'Calling Gemini for Amazon text extraction.');
-      const results = await parseOrderText(
+      const response = await parseOrderText(
         pastedText,
         categories.map((category) => category.name),
-      );
+      ) as unknown as GeminiResponse;
+
+      const results = response?.receipts || [];
       const savedReceipts: Receipt[] = [];
 
       let skippedCount = 0;
       updateImportStatus('amazon-text', 'saving', 'Saving extracted Amazon text receipts.');
       for (let index = 0; index < results.length; index++) {
-        const candidate = createReceiptFromParsedOrder(
+        const candidate = dedupeAmazonReceiptItems(createReceiptFromParsedOrder(
           results[index],
           index,
           categories,
           defaultPaymentRule,
-        );
+        ));
 
         if (isDuplicateReceipt(candidate, [...receipts, ...savedReceipts])) {
           skippedCount++;
@@ -224,11 +246,13 @@ export function useReceiptImportHandlers({
       const imageUrl = await readFileAsDataUrl(file);
       const base64 = imageUrl.split(',')[1];
       updateImportStatus('receipt-image', 'calling-gemini', 'Calling Gemini for receipt image analysis.');
-      const results = await scanReceipt(
+      const response = await scanReceipt(
         base64,
         file.type,
         categories.map((category) => category.name),
-      );
+      ) as unknown as GeminiResponse;
+
+      const results = response?.receipts || [];
       const newReceipts = results.map((result, index) =>
         createReceiptFromScanResult(
           result,
