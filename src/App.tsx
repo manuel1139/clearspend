@@ -79,7 +79,7 @@ export default function App() {
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
   const [draggedCategoryIndex, setDraggedCategoryIndex] = useState<number | null>(null);
   const [geminiApiKey, setGeminiApiKey] = useState<string | null>(null);
-  const [lastAiResult, setLastAiResult] = useState<{ prompt: string; response: string; timestamp: string } | null>(null);
+  const [aiHistory, setAiHistory] = useState<{ action: string; prompt: string; response: string; timestamp: string }[]>([]);
   const [detectedEnvKeys, setDetectedEnvKeys] = useState<string[]>([]);
   const [activeScreen, setActiveScreen] = useState<
     'dashboard' | 'intake' | 'config' | 'konto' | 'debug' | 'forecast' | 'recurring'
@@ -92,10 +92,11 @@ export default function App() {
         .then((data) => {
           setGeminiApiKey(data.apiKey);
           setDetectedEnvKeys(data.detectedKeys || []);
-          setLastAiResult(data.lastAiResult);
-          if (data.lastAiResult) {
-            console.log('[AI Debug] Last Prompt:', data.lastAiResult.prompt);
-            console.log('[AI Debug] Last Response:', data.lastAiResult.response);
+          setAiHistory(data.aiHistory || []);
+          if (data.aiHistory && data.aiHistory.length > 0) {
+            const last = data.aiHistory[data.aiHistory.length - 1];
+            console.log('[AI Debug] Last Prompt:', last.prompt);
+            console.log('[AI Debug] Last Response:', last.response);
           }
         })
         .catch(() => setGeminiApiKey(null));
@@ -266,7 +267,7 @@ export default function App() {
                   receipts={receipts}
                   geminiApiKey={geminiApiKey}
                   detectedEnvKeys={detectedEnvKeys}
-                  lastAiResult={lastAiResult}
+                  aiHistory={aiHistory}
                 />
               )}
             </div>

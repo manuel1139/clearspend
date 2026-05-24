@@ -5,11 +5,10 @@ interface DebugScreenProps {
   kontoEntries: { entries: KontoEntry[] };
   receipts: { receipts: Receipt[] };
   geminiApiKey: string | null;
-  detectedEnvKeys: string[];
-  lastAiResult: { prompt: string; response: string; timestamp: string } | null;
+  detectedEnvKeys: string[];  aiHistory: { action: string; prompt: string; response: string; timestamp: string }[];
 }
 
-export function DebugScreen({ kontoEntries, receipts, geminiApiKey, detectedEnvKeys, lastAiResult }: DebugScreenProps) {
+export function DebugScreen({ kontoEntries, receipts, geminiApiKey, detectedEnvKeys, aiHistory }: DebugScreenProps) {
   return (
     <div className="space-y-4">
       <div className="rounded-4xl bg-[linear-gradient(145deg,#4A1234_0%,#7E2158_45%,#B9387B_100%)] p-4 text-white shadow-xl">
@@ -33,22 +32,27 @@ export function DebugScreen({ kontoEntries, receipts, geminiApiKey, detectedEnvK
               {geminiApiKey || `Not found. Found: ${detectedEnvKeys.join(', ') || 'None'}`}
             </p>
           </div>
-          {lastAiResult && (
-            <div className="col-span-2 space-y-3 rounded-2xl bg-white/5 p-3">
+          {aiHistory.slice().reverse().map((result, idx) => (
+            <div key={idx} className="col-span-2 space-y-3 rounded-2xl bg-white/5 p-3 mb-4">
+              <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest">
+                  {result.action} @ {new Date(result.timestamp).toLocaleTimeString()}
+                </p>
+              </div>
               <div>
-                <p className="text-white/50 text-[10px]">Last AI Prompt</p>
+                <p className="text-white/50 text-[10px]">AI Prompt</p>
                 <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap font-mono text-[9px] text-white/70">
-                  {lastAiResult.prompt}
+                  {result.prompt}
                 </pre>
               </div>
               <div className="border-t border-white/5 pt-2">
-                <p className="text-white/50 text-[10px]">Last AI Response</p>
+                <p className="text-white/50 text-[10px]">AI Response</p>
                 <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[9px] text-green-400/80">
-                  {lastAiResult.response}
+                  {result.response}
                 </pre>
               </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
     </div>

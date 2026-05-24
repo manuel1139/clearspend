@@ -19,7 +19,7 @@ import { buildReceiptListSchema } from './geminiSchema.js';
 import { parseAmazonOrdersCsv } from './amazonImport.js';
 import { parseCamtZipBase64 } from './kontoImport.js';
 
-let lastAiResult: { prompt: string; response: string; timestamp: string } | null = null;
+let aiHistory: { action: string; prompt: string; response: string; timestamp: string }[] = [];
 
 export async function createApp(connectionString: string) {
   const app = express();
@@ -37,7 +37,7 @@ export async function createApp(connectionString: string) {
       configured: !!apiKey, 
       apiKey: apiKey || null,
       detectedKeys: Object.keys(process.env).filter(k => /gemini|gemniy/i.test(k)),
-      lastAiResult
+      aiHistory
     });
   });
 
@@ -110,11 +110,13 @@ export async function createApp(connectionString: string) {
       const rawResponse = response.response.text();
       console.log(`[Gemini Response - ${action}]`, rawResponse);
 
-      lastAiResult = {
+      aiHistory.push({
+        action,
         prompt: promptText,
         response: rawResponse,
         timestamp: new Date().toISOString()
-      };
+      });
+      if (aiHistory.length > 20) aiHistory.shift();
 
       try {
         res.json(JSON.parse(rawResponse));
