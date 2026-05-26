@@ -7,6 +7,7 @@ import {
   parseISO,
   startOfDay,
   startOfMonth,
+  startOfWeek,
   subDays,
   subMonths,
   subYears,
@@ -23,6 +24,7 @@ export interface SpendHistoryPoint {
 export type DateRangePreset =
   | 'all'
   | 'current-year'
+  | 'current-week'
   | 'current-month'
   | 'last-month'
   | 'last-year'
@@ -69,6 +71,11 @@ export function resolveDateRange(
     case 'current-month':
       return {
         start: startOfDay(startOfMonth(now)),
+        end: endOfDay(now),
+      };
+    case 'current-week':
+      return {
+        start: startOfDay(startOfWeek(now, { weekStartsOn: 1 })),
         end: endOfDay(now),
       };
     case 'current-year':

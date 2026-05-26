@@ -5,6 +5,12 @@ import { getBudget, updateBudget } from '../database.js';
 export function createSettingsRouter(pool: sql.ConnectionPool) {
   const router = Router();
 
+  router.get('/use-ai', (_req, res) => {
+    res.json({
+      useAi: process.env.USE_AI ?? null,
+    });
+  });
+
   router.get('/budget', async (_req, res) => {
     try {
       res.json({ budget: await getBudget(pool) });

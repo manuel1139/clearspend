@@ -4,7 +4,7 @@ import { ImportSummary } from '../types';
 
 interface IntakeScreenProps {
   imports: { // Changed from any
-    geminiConfigured: boolean;
+    aiConfigured: boolean;
     lastImportPhase: string;
     lastImportMessage: string;
     setIsPasting: (v: boolean) => void;
@@ -29,7 +29,7 @@ export function IntakeScreen({ imports, fileInputRef, csvInputRef, kontoZipInput
 
       <div className="rounded-[1.7rem] bg-white/12 p-4 text-white backdrop-blur-sm">
         <div className="flex justify-between gap-3 text-xs">
-          <p>Gemini: <strong>{imports.geminiConfigured ? 'Configured' : 'Missing Key'}</strong></p>
+          <p>AI: <strong>{imports.aiConfigured ? 'Configured' : 'Missing Key'}</strong></p>
           <p>Status: <strong>{imports.lastImportPhase}</strong></p> {/* Added imports.lastImportPhase */}
         </div>
         <p className="mt-3 text-xs text-white/60 italic">{imports.lastImportMessage}</p>

@@ -9,11 +9,11 @@ interface BankingScreenProps {
   };
   isCategorizingAI: boolean;
   setIsCategorizingAI: (val: boolean) => void;
-  geminiConfigured: boolean;
+  aiConfigured: boolean;
   setError: (err: string | null) => void;
 }
 
-export function BankingScreen({ kontoEntries, isCategorizingAI, setIsCategorizingAI, geminiConfigured, setError }: BankingScreenProps) {
+export function BankingScreen({ kontoEntries, isCategorizingAI, setIsCategorizingAI, aiConfigured, setError }: BankingScreenProps) {
   const handleCategorizeSonstigesAI = async () => {
     if (isCategorizingAI) return;
     setIsCategorizingAI(true);
@@ -39,7 +39,7 @@ export function BankingScreen({ kontoEntries, isCategorizingAI, setIsCategorizin
           <p className="text-[11px] uppercase tracking-widest text-white/60">Entries</p>
           <button
             onClick={handleCategorizeSonstigesAI}
-            disabled={isCategorizingAI || !geminiConfigured}
+            disabled={isCategorizingAI || !aiConfigured}
             className="flex items-center gap-1.5 rounded-full bg-white/12 px-2 py-0.5 text-[9px] font-bold text-white transition hover:bg-white/20"
           >
             <Sparkles size={10} className={isCategorizingAI ? 'animate-pulse' : 'text-[#FFD0E6]'} />

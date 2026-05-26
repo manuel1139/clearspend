@@ -1,4 +1,5 @@
 import React from 'react';
+import type { GeminiHistoryEntry } from '../lib/gemini';
 import { KontoEntry, Receipt } from '../types';
 
 interface DebugScreenProps {
@@ -6,7 +7,7 @@ interface DebugScreenProps {
   receipts: { receipts: Receipt[] };
   geminiApiKey: string | null;
   detectedEnvKeys: string[];
-  aiHistory: { action: string; prompt: string; response: string; timestamp: string }[];
+  aiHistory: GeminiHistoryEntry[];
 }
 
 export function DebugScreen({ kontoEntries, receipts, geminiApiKey, detectedEnvKeys, aiHistory }: DebugScreenProps) {

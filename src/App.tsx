@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ImportSummaryBanner } from './components/ImportSummaryBanner';
 import { PasteOrderModal } from './components/PasteOrderModal';
 import { ReceiptCard } from './components/ReceiptCard';
@@ -14,6 +14,7 @@ import { useBudget } from './hooks/useBudget';
 import { useCategories } from './hooks/useCategories';
 import { usePaymentRules } from './hooks/usePaymentRules';
 import { useKontoEntries } from './hooks/useKontoEntries';
+import { useGeminiDebug } from './hooks/useGeminiDebug';
 import { useReceiptImport } from './hooks/useReceiptImport';
 import { ErrorAlert } from './components/ErrorAlert';
 import { useReceipts } from './hooks/useReceipts';
@@ -33,10 +34,11 @@ import { AppHeader } from './components/AppHeader';
 const HISTORY_RANGE_OPTIONS: { value: DateRangePreset; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'current-year', label: 'This year' },
+  { value: 'current-week', label: 'This week' },
   { value: 'current-month', label: 'Current month' },
   { value: 'last-month', label: 'Last month' },
   { value: 'last-year', label: 'Last year' },
-  { value: 'last-10-days', label: 'Last 10 days' },
+  { value: 'last-10-days', label: 'Last 10' },
   { value: 'custom', label: 'Custom dates' },
 ];
 
@@ -78,30 +80,10 @@ export default function App() {
   const [customRangeEnd, setCustomRangeEnd] = useState('');
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
   const [draggedCategoryIndex, setDraggedCategoryIndex] = useState<number | null>(null);
-  const [geminiApiKey, setGeminiApiKey] = useState<string | null>(null);
-  const [aiHistory, setAiHistory] = useState<{ action: string; prompt: string; response: string; timestamp: string }[]>([]);
-  const [detectedEnvKeys, setDetectedEnvKeys] = useState<string[]>([]);
   const [activeScreen, setActiveScreen] = useState<
     'dashboard' | 'intake' | 'config' | 'konto' | 'debug' | 'forecast' | 'recurring'
   >('dashboard');
-
-  useEffect(() => {
-    if (activeScreen === 'debug') {
-      fetch('/api/gemini/status')
-        .then((res) => res.json())
-        .then((data) => {
-          setGeminiApiKey(data.apiKey);
-          setDetectedEnvKeys(data.detectedKeys || []);
-          setAiHistory(data.aiHistory || []);
-          if (data.aiHistory && data.aiHistory.length > 0) {
-            const last = data.aiHistory[data.aiHistory.length - 1];
-            console.log('[AI Debug] Last Prompt:', last.prompt);
-            console.log('[AI Debug] Last Response:', last.response);
-          }
-        })
-        .catch(() => setGeminiApiKey(null));
-    }
-  }, [activeScreen]);
+  const geminiDebug = useGeminiDebug(activeScreen === 'debug');
 
   const [accounts, setAccounts] = useState<AccountOverview[]>(MOCK_ACCOUNTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -228,7 +210,7 @@ export default function App() {
                   setDraggedCategoryIndex={setDraggedCategoryIndex}
                   isCategorizingAI={isCategorizingAI}
                   setIsCategorizingAI={setIsCategorizingAI}
-                  geminiConfigured={imports.geminiConfigured}
+                  aiConfigured={imports.aiConfigured}
                   setError={setError}
                 />
               )}
@@ -246,7 +228,7 @@ export default function App() {
                   kontoEntries={kontoEntries}
                   isCategorizingAI={isCategorizingAI}
                   setIsCategorizingAI={setIsCategorizingAI}
-                  geminiConfigured={imports.geminiConfigured}
+                  aiConfigured={imports.aiConfigured}
                   setError={setError}
                 />
               )}
@@ -265,9 +247,9 @@ export default function App() {
                 <DebugScreen
                   kontoEntries={kontoEntries}
                   receipts={receipts}
-                  geminiApiKey={geminiApiKey}
-                  detectedEnvKeys={detectedEnvKeys}
-                  aiHistory={aiHistory}
+                  geminiApiKey={geminiDebug.geminiApiKey}
+                  detectedEnvKeys={geminiDebug.detectedEnvKeys}
+                  aiHistory={geminiDebug.aiHistory}
                 />
               )}
             </div>

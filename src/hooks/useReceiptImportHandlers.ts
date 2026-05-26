@@ -1,34 +1,14 @@
 import { useState, useEffect } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { saveReceiptRequest } from '../lib/api/receipts';
-import { isGeminiConfigured, checkGeminiStatus } from '../lib/gemini';
-import { parseOrderText, scanReceipt } from '../lib/gemini';
+import { getActiveAiClient } from '../lib/aiProvider';
 import {
   createReceiptFromParsedOrder,
   createReceiptFromScanResult,
 } from '../lib/receiptFactories';
-import type { ImportSummary, Receipt, ReceiptItem } from '../types';
+import type { AiProvider } from '../lib/aiClient';
+import type { ImportSummary, Receipt, ReceiptItem, ScannedReceipt } from '../types';
 import type { UseReceiptImportOptions } from './receiptImportTypes';
-
-interface RawGeminiReceipt {
-  merchant: string;
-  date: string;
-  total: number;
-  currency: string;
-  category: string;
-  items?: Array<{
-    name: string;
-    price: number;
-    quantity: number;
-    imageUrl?: string;
-  }>;
-  tags?: string[];
-  box_2d?: number[];
-}
-
-interface GeminiResponse {
-  receipts: RawGeminiReceipt[];
-}
 
 function readFileAsText(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -65,8 +45,12 @@ interface UseReceiptImportHandlersOptions extends UseReceiptImportOptions {
   setImportSummary: (summary: ImportSummary | null) => void;
 }
 
-type ImportPhase = 'idle' | 'preparing' | 'calling-gemini' | 'saving' | 'done' | 'failed';
+type ImportPhase = 'idle' | 'preparing' | 'calling-ai' | 'saving' | 'done' | 'failed';
 type ImportKind = 'receipt-image' | 'amazon-text' | 'amazon-csv' | 'konto-zip' | null;
+
+function getAiDisplayName(provider: AiProvider | null) {
+  return provider === 'AZURE' ? 'Azure AI' : 'Gemini';
+}
 
 function getOrderTag(receipt: Receipt) {
   return receipt.tags.find((tag) => tag.startsWith('Order: ')) ?? null;
@@ -136,14 +120,41 @@ export function useReceiptImportHandlers({
   const [lastImportKind, setLastImportKind] = useState<ImportKind>(null);
   const [lastImportPhase, setLastImportPhase] = useState<ImportPhase>('idle');
   const [lastImportMessage, setLastImportMessage] = useState('No import started yet.');
-  const [geminiConfigured, setGeminiConfigured] = useState(isGeminiConfigured());
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [aiProvider, setAiProvider] = useState<AiProvider | null>(null);
+  const [aiClient, setAiClient] = useState<Awaited<ReturnType<typeof getActiveAiClient>> | null>(null);
 
   useEffect(() => {
-    const checkStatus = async () => {
-      const isOk = await checkGeminiStatus();
-      setGeminiConfigured(isOk);
+    let isMounted = true;
+
+    const initializeAiClient = async () => {
+      try {
+        const activeAiClient = await getActiveAiClient();
+        const isOk = await activeAiClient.checkStatus();
+
+        if (!isMounted) {
+          return;
+        }
+
+        setAiClient(activeAiClient);
+        setAiProvider(activeAiClient.provider);
+        setAiConfigured(isOk);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setAiClient(null);
+        setAiProvider(null);
+        setAiConfigured(false);
+      }
     };
-    void checkStatus();
+
+    void initializeAiClient();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const updateImportStatus = (
@@ -165,20 +176,30 @@ export function useReceiptImportHandlers({
       onError('Create categories and payment rules before importing receipts.');
       return;
     }
+    if (!aiClient) {
+      onError('AI provider is not available yet.');
+      return;
+    }
 
     setIsScanning(true);
     setIsPasting(false);
     onError(null);
-    updateImportStatus('amazon-text', 'preparing', 'Preparing Amazon text for Gemini.');
+    updateImportStatus(
+      'amazon-text',
+      'preparing',
+      `Preparing Amazon text for ${getAiDisplayName(aiProvider)}.`,
+    );
 
     try {
-      updateImportStatus('amazon-text', 'calling-gemini', 'Calling Gemini for Amazon text extraction.');
-      const response = await parseOrderText(
+      updateImportStatus(
+        'amazon-text',
+        'calling-ai',
+        `Calling ${getAiDisplayName(aiProvider)} for Amazon text extraction.`,
+      );
+      const results = await aiClient.parseOrderText(
         pastedText,
         categories.map((category) => category.name),
-      ) as unknown as GeminiResponse;
-
-      const results = response?.receipts || [];
+      );
       const savedReceipts: Receipt[] = [];
 
       let skippedCount = 0;
@@ -211,7 +232,11 @@ export function useReceiptImportHandlers({
         );
       } else {
         onError('Keine Bestelldaten im Text erkannt.');
-        updateImportStatus('amazon-text', 'failed', 'Gemini returned no usable Amazon text receipts.');
+        updateImportStatus(
+          'amazon-text',
+          'failed',
+          `${getAiDisplayName(aiProvider)} returned no usable Amazon text receipts.`,
+        );
       }
     } catch (error) {
       updateImportStatus(
@@ -236,24 +261,36 @@ export function useReceiptImportHandlers({
       onError('Create categories and payment rules before importing receipts.');
       return;
     }
+    if (!aiClient) {
+      onError('AI provider is not available yet.');
+      return;
+    }
 
     setIsScanning(true);
     onError(null);
     onClearReview();
-    updateImportStatus('receipt-image', 'preparing', 'Preparing receipt image for Gemini.');
+    updateImportStatus(
+      'receipt-image',
+      'preparing',
+      `Preparing receipt image for ${getAiDisplayName(aiProvider)}.`,
+    );
 
     try {
       const imageUrl = await readFileAsDataUrl(file);
       const base64 = imageUrl.split(',')[1];
-      updateImportStatus('receipt-image', 'calling-gemini', 'Calling Gemini for receipt image analysis.');
-      const response = await scanReceipt(
+      updateImportStatus(
+        'receipt-image',
+        'calling-ai',
+        `Calling ${getAiDisplayName(aiProvider)} for receipt image analysis.`,
+      );
+      const results = await aiClient.scanReceipt({
         base64,
-        file.type,
-        categories.map((category) => category.name),
-      ) as unknown as GeminiResponse;
+        file,
+        mimeType: file.type,
+        categoryNames: categories.map((category) => category.name),
+      });
 
-      const results = response?.receipts || [];
-      const newReceipts = results.map((result, index) =>
+      const newReceipts = results.map((result: ScannedReceipt, index) =>
         createReceiptFromScanResult(
           result,
           index,
@@ -272,7 +309,7 @@ export function useReceiptImportHandlers({
         updateImportStatus(
           'receipt-image',
           'done',
-          `Gemini found ${newReceipts.length} receipt(s); ${uniqueReceipts.length} ready for review, ${skippedCount} duplicates skipped.`,
+          `${getAiDisplayName(aiProvider)} found ${newReceipts.length} receipt(s); ${uniqueReceipts.length} ready for review, ${skippedCount} duplicates skipped.`,
         );
       } else {
         const message = skippedCount > 0 
@@ -454,7 +491,7 @@ export function useReceiptImportHandlers({
     pastedText,
     setPastedText,
     isDragging,
-    geminiConfigured,
+    aiConfigured,
     lastImportKind,
     lastImportPhase,
     lastImportMessage,

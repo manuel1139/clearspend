@@ -25,7 +25,6 @@ async function startServer() {
 
   app.listen(port, () => {
     console.info(`Server running on port ${port}`);
-    console.info(`GEMINI_API_KEY: ${process.env.GEMINI_API_KEY}`);
   });
 }
 
